@@ -1,122 +1,81 @@
-# 🛡️ DriftGuard — Self-Healing ML Monitoring System
+# DriftGuard: Self-Healing ML Monitoring System (IEEE-CIS Edition)
 
 [![CI](https://github.com/YOUR_USERNAME/driftguard/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/driftguard/actions/workflows/ci.yml)
-[![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://python.org)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://python.org)
 [![MLflow](https://img.shields.io/badge/MLflow-2.12-orange.svg)](https://mlflow.org)
 [![Evidently](https://img.shields.io/badge/Evidently-0.4.30-purple.svg)](https://evidentlyai.com)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-green.svg)](https://fastapi.tiangolo.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> A **production-grade MLOps system** for credit card fraud detection that automatically
-> detects data drift, retrains the model, and promotes the challenger only if it beats
-> the champion — zero human intervention required.
+A production-grade MLOps system for e-commerce fraud detection on the
+IEEE-CIS dataset (590k transactions, Vesta Corporation). Detects genuine
+temporal data drift, retrains automatically, and promotes a challenger model
+only when it outperforms the current champion.
 
-🎯 **[Live Demo: Dashboard](https://YOUR_APP.streamlit.app)** |
-📡 **[Live Demo: API Docs](https://driftguard-api.onrender.com/docs)**
+**Live demo:** [Dashboard](https://YOUR_APP.streamlit.app) |
+[API](https://driftguard-ieee-api.onrender.com/docs)
 
 ---
 
 ## Architecture
-[creditcard.csv] → [DVC] → [Feast Feature Store]
-│
-▼
-[Prefect Pipeline] → [LightGBM+SMOTE] → [MLflow Registry (@champion alias)]
-▲                                              │
-│                                              ▼
-[Self-Heal Loop] ← [Evidently AI Drift] ← [FastAPI /predict + aiosqlite log]
-│
-└── if drift → retrain → champion/challenger → promote if better
-│
-[Streamlit Dashboard: Predictions + Drift + Registry]
-│
-[GitHub Actions CI/CD] → [Render.com (API)] + [Streamlit Cloud (Dashboard)]
+train_transaction.csv + train_identity.csv
+|
+v
+Left join on TransactionID -> Feature engineering -> Temporal split
+|                         (log-transform,         (train/test/ref/
+|                          D normalisation,         batches by time)
+|                          label encoding)
+|
+v
+DVC (data versioning) -> Feast (feature store, Parquet offline + SQLite online)
+|
+v
+Prefect Pipeline -> LightGBM + SMOTE -> MLflow Registry (@champion alias)
+^                                          |
+|                                          v
+Self-Healing Loop <- Evidently AI Drift <- FastAPI /predict + aiosqlite log
+(real temporal drift)
+|
+Streamlit Dashboard (Predictions, Drift, Registry)
+|
+GitHub Actions CI/CD -> Render.com + Streamlit Cloud
 
-## Key Features
+## Key Technical Decisions
 
-| Feature | Tool | What it does |
-|---|---|---|
-| Self-healing loop | Prefect 2.19 | Orchestrates detect → retrain → promote |
-| Drift detection | Evidently 0.4.30 | Statistical drift on every production batch |
-| Experiment tracking | MLflow 2.12 | Logs every run, aliases champion model |
-| Model training | LightGBM 4.3 + SMOTE | Handles 0.17% fraud imbalance correctly |
-| Feature store | Feast 0.39 | Prevents training-serving skew |
-| Async serving | FastAPI + aiosqlite | Sub-10ms predictions, WAL-mode logging |
-| Full stack | Docker Compose | One-command local deployment |
-| CI/CD | GitHub Actions | Tests + auto-deploy on push to main |
+| Decision | Rationale |
+|---|---|
+| Left join transaction + identity | 59% of transactions have no identity record; inner join would lose them |
+| Temporal split, not random split | Random split causes data leakage in time-ordered fraud data |
+| D column normalisation (Dn = D - day) | Removes absolute time trend; makes feature stable across time windows |
+| log1p(TransactionAmt) | Reduces right skew in the transaction amount distribution |
+| scale_pos_weight=28 | Reflects 3.5% fraud rate (96.5/3.5 = 27.6) without inflating dataset |
+| Label encoding, not one-hot | LightGBM handles ordinal-encoded categoricals natively and efficiently |
+| Encoders committed to repo | Render free tier has ephemeral filesystem; artefacts must be in the image |
+| Real temporal drift for monitoring | Batches from later time windows have genuine distributional shift |
+
+## Dataset
+
+IEEE-CIS Fraud Detection - Kaggle / Vesta Corporation / IEEE Computational Intelligence Society
+590,540 e-commerce transactions | 20,663 fraud cases (3.5%) | ~96 engineered features
+Download: https://www.kaggle.com/competitions/ieee-fraud-detection/data
 
 ## Quickstart
 ```bash
 git clone https://github.com/YOUR_USERNAME/driftguard.git
 cd driftguard
+python3.11 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# 1. Download dataset → data/raw/creditcard.csv
-#    https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud
-
-# 2. Prepare data
-make setup
-
-# 3. Train model
-make train
-
-# 4. Run API (Terminal 1)
-make api
-
-# 5. Run dashboard (Terminal 2)
-make dashboard
+# Place train_transaction.csv and train_identity.csv in data/raw/
+make setup     # ~5 minutes - joins, engineers features, splits temporally
+make train     # ~10 minutes - trains LightGBM on 413k rows
+make api       # Terminal 1
+make dashboard # Terminal 2
 ```
 
-**Or use Docker (full stack):**
+Full stack:
 ```bash
 docker compose up --build
-# API:       http://localhost:8000/docs
-# Dashboard: http://localhost:8501
-# MLflow:    http://localhost:5000
 ```
 
-## Project Structure
-driftguard/
-├── app.py                              # Streamlit Cloud entrypoint
-├── pages/                              # Streamlit multi-page app
-│   ├── 1_predictions.py
-│   ├── 2_drift_monitor.py
-│   └── 3_model_registry.py
-├── src/
-│   ├── config.py                       # Central config (paths, params)
-│   ├── data/preprocess.py              # Data splits + drift simulation
-│   ├── features/feature_store.py       # Feast helpers
-│   ├── training/
-│   │   ├── train.py                    # LightGBM + SMOTE + MLflow
-│   │   └── pipeline.py                 # Prefect orchestration flow
-│   ├── serving/api.py                  # FastAPI + aiosqlite serving
-│   └── monitoring/
-│       ├── drift_detector.py           # Evidently AI reports
-│       └── retrain_trigger.py          # Self-healing Prefect flow
-├── feast/                              # Feature store definitions
-│   ├── feature_store.yaml
-│   └── features.py
-├── tests/                              # pytest unit + integration tests
-│   ├── conftest.py                     # Fixtures + CI skip markers
-│   ├── test_config.py
-│   ├── test_api.py
-│   └── test_preprocessing.py
-├── .github/workflows/
-│   ├── ci.yml                          # Test + Docker build on every PR
-│   └── deploy.yml                      # Auto-deploy to Render on main push
-├── Dockerfile.api
-├── Dockerfile.dashboard
-├── docker-compose.yml                  # Full local stack
-├── render.yaml                         # Render.com IaC config
-├── packages.txt                        # System deps for Streamlit Cloud
-├── requirements.txt
-└── Makefile
-
-## Dataset
-
-**Credit Card Fraud Detection** by ULB (Université Libre de Bruxelles)
-284,807 transactions | 492 fraud (0.17%) | V1–V28 are PCA-transformed features
-Download: https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud
-
 ## License
-
 MIT
