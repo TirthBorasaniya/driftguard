@@ -1,0 +1,51 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "title": "Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "rate(http_requests_total[1m])", "legendFormat": "{{handler}} {{status}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    },
+    {
+      "title": "Latency Percentiles (p50 / p95 / p99)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket[1m]))", "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[1m]))", "legendFormat": "p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[1m]))", "legendFormat": "p99", "refId": "C"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []}
+    },
+    {
+      "title": "4xx Error Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [{"expr": "rate(http_requests_total{status=~\"4..\"}[1m])", "legendFormat": "4xx", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    },
+    {
+      "title": "5xx Error Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{"expr": "rate(http_requests_total{status=~\"5..\"}[1m])", "legendFormat": "5xx", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    },
+    {
+      "title": "Prediction Throughput",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+      "targets": [{"expr": "rate(model_predictions_total[1m])", "legendFormat": "{{predicted_class}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["fraud-pipeline", "infrastructure"],
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "Infrastructure Health",
+  "uid": "fraud-infra"
+}

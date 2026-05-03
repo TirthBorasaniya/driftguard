@@ -1,0 +1,11 @@
+{
+  "name": "heavy_drift",
+  "description": "Simulates significant distributional shift: higher transaction amounts, category concentration, state concentration.",
+  "amt_multiplier": 3.0,
+  "category_shift": {
+    "grocery_pos": 0.40,
+    "gas_transport": 0.35
+  },
+  "state_concentration": "TX",
+  "state_concentration_rate": 0.70
+}

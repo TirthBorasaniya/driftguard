@@ -1,0 +1,81 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "title": "Prediction Score Distribution",
+      "type": "histogram",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [{"expr": "rate(http_request_duration_seconds_bucket[5m])", "legendFormat": "{{le}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []}
+    },
+    {
+      "title": "Drift Score (share of drifted features)",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0},
+      "targets": [{"expr": "model_drift_score", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0, "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 0.2},
+              {"color": "red", "value": 0.3}
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Champion AUC-PR",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0},
+      "targets": [{"expr": "model_champion_auc_pr", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []}
+    },
+    {
+      "title": "Drift Score Over Time",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [{"expr": "model_drift_score", "legendFormat": "drift share", "refId": "A"}],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 0.3}]}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "title": "Dead Letter Queue Rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{"expr": "rate(kafka_dlq_messages_total[1m])", "legendFormat": "DLQ messages/s", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
+    },
+    {
+      "title": "Fraud vs Legit Predictions",
+      "type": "piechart",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [{"expr": "model_predictions_total", "legendFormat": "{{predicted_class}}", "refId": "A"}],
+      "fieldConfig": {"defaults": {}, "overrides": []}
+    },
+    {
+      "title": "Champion AUC-PR Over Time",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "targets": [{"expr": "model_champion_auc_pr", "legendFormat": "AUC-PR", "refId": "A"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []}
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["fraud-pipeline", "ml-health"],
+  "time": {"from": "now-1h", "to": "now"},
+  "title": "ML Health",
+  "uid": "fraud-ml-health"
+}
