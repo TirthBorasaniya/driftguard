@@ -1,10 +1,16 @@
-# Data — tracked separately (too large for git)
+# Data — tracked separately (too large for git, may contain dataset records)
 data/raw/
 data/processed/
 data/features/
+data/reference/
+data/production_batches/
 
-# Encoders and model artifacts — commit these for deployment
-# data/encoders/   <- intentionally NOT ignored
+# Encoders — NOT committed. The .pkl files embed raw categorical vocabularies
+# and are pickle blobs (deserialization risk). Regenerate locally / ship via
+# a release asset or object store for deployment.
+data/encoders/*.pkl
+
+# Model artifact — committed for deployment (see render.yaml)
 # models/          <- intentionally NOT ignored
 
 # MLflow
