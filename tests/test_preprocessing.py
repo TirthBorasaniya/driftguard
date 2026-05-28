@@ -1,139 +1,100 @@
-"""Tests for data preprocessing module."""
+"""Tests for data preprocessing: imputation, temporal split, and aggregation builders."""
 
 import numpy as np
 import pandas as pd
 import pytest
 
-import src.config as cfg
-from src.config import CATEGORICAL_COLS, D_COLS_TO_NORMALIZE, NUMERIC_COLS
-from src.data.preprocess import (
-    encode_categoricals,
-    engineer_features,
-    impute_missing,
-    temporal_split,
-)
+from src.config import NUMERIC_COLS, TARGET_COL
+from src.data.preprocess import build_card_stats, build_category_stats, impute_numeric, temporal_split
 
 
-def test_engineer_features_creates_columns(sample_transaction_df):
-    """Feature engineering must create all expected derived columns."""
-    df = engineer_features(sample_transaction_df.copy())
-    assert "TransactionAmt_log" in df.columns
-    assert "transaction_day" in df.columns
-    assert "transaction_hour" in df.columns
-    for col in D_COLS_TO_NORMALIZE:
-        assert f"{col}n" in df.columns
+@pytest.fixture
+def minimal_train_df(sample_df):
+    """sample_df with derived features already present for preprocess tests."""
+    from src.features.engineering import engineer_features
+
+    return engineer_features(sample_df)
 
 
-def test_transaction_amt_log_correct(sample_transaction_df):
-    """Log-transformed amount must equal log1p of raw amount."""
-    df = engineer_features(sample_transaction_df.copy())
-    assert (df["TransactionAmt_log"] >= 0).all()
-    np.testing.assert_allclose(
-        df["TransactionAmt_log"],
-        np.log1p(sample_transaction_df["TransactionAmt"]),
-    )
-
-
-def test_temporal_features_range(sample_transaction_df):
-    """Temporal cycle features must be within expected ranges."""
-    df = engineer_features(sample_transaction_df.copy())
-    assert df["transaction_day"].between(0, 7).all()
-    assert df["transaction_hour"].between(0, 24).all()
-
-
-def test_d_normalization(sample_transaction_df):
-    """Normalized D columns must equal D - transaction_day."""
-    df = engineer_features(sample_transaction_df.copy())
-    for col in D_COLS_TO_NORMALIZE:
-        if col in sample_transaction_df.columns:
-            col_norm = f"{col}n"
-            mask = df[col].notna()
-            if mask.any():
-                expected = df.loc[mask, col] - df.loc[mask, "transaction_day"]
-                np.testing.assert_allclose(df.loc[mask, col_norm], expected)
-
-
-def test_encode_categoricals_produces_integers(sample_transaction_df, tmp_path):
-    """Encoded categorical columns must be integer type."""
-    original_dir = cfg.ENCODERS_DIR
-    cfg.ENCODERS_DIR = tmp_path
-
-    try:
-        df = engineer_features(sample_transaction_df.copy())
-        df = encode_categoricals(df, o_fit_encoders=True)
-        for col in CATEGORICAL_COLS:
-            if col in df.columns:
-                assert df[col].dtype in [np.int64, np.int32, int, np.intp]
-    finally:
-        cfg.ENCODERS_DIR = original_dir
-
-
-def test_encoder_round_trip(sample_transaction_df, tmp_path):
-    """Encoding then loading encoders must produce consistent results."""
-    original_dir = cfg.ENCODERS_DIR
-    cfg.ENCODERS_DIR = tmp_path
-
-    try:
-        df1 = engineer_features(sample_transaction_df.copy())
-        df1 = encode_categoricals(df1, o_fit_encoders=True)
-
-        df2 = engineer_features(sample_transaction_df.copy())
-        df2 = encode_categoricals(df2, o_fit_encoders=False)
-
-        for col in CATEGORICAL_COLS:
-            if col in df1.columns and col in df2.columns:
-                pd.testing.assert_series_equal(df1[col], df2[col])
-    finally:
-        cfg.ENCODERS_DIR = original_dir
-
-
-def test_impute_missing_no_nans(sample_transaction_df):
-    """After imputation, no numeric feature column should contain NaN."""
-    df = engineer_features(sample_transaction_df.copy())
-    df = impute_missing(df)
+def test_impute_numeric_fills_missing(minimal_train_df):
+    """impute_numeric must replace NaN with -999 in every numeric column."""
+    df = minimal_train_df.copy()
+    if "amt" in df.columns:
+        df.loc[0, "amt"] = np.nan
+    result = impute_numeric(df)
     for col in NUMERIC_COLS:
-        if col in df.columns:
-            assert not df[col].isna().any(), f"NaN found in {col}"
+        if col in result.columns:
+            assert not result[col].isna().any(), f"NaN found in {col} after imputation"
 
 
-def test_impute_missing_fills_with_negative_999(sample_transaction_df):
-    """Missing numeric values must be filled with -999."""
-    df = engineer_features(sample_transaction_df.copy())
-    # introduce a known NaN
-    df.loc[0, "dist1"] = np.nan
-    df = impute_missing(df)
-    assert df.loc[0, "dist1"] == -999
+def test_impute_numeric_fills_sentinel(minimal_train_df):
+    """impute_numeric must use -999 as the sentinel fill value."""
+    df = minimal_train_df.copy()
+    if "amt" in df.columns:
+        df.loc[0, "amt"] = np.nan
+    result = impute_numeric(df)
+    if "amt" in result.columns:
+        assert result.loc[0, "amt"] == pytest.approx(-999.0)
 
 
-def test_temporal_split_preserves_order(sample_transaction_df):
-    """Temporal splits must be non-overlapping and time-ordered."""
-    df = engineer_features(sample_transaction_df.copy())
-    splits = temporal_split(df)
-
-    max_times = []
-    for name in ["train", "test", "reference", "batch_0", "batch_1", "batch_2"]:
-        if name in splits and len(splits[name]) > 0:
-            max_times.append(splits[name]["TransactionDT"].max())
-
-    # each subsequent split's max time should be >= previous
-    for i in range(1, len(max_times)):
-        assert max_times[i] >= max_times[i - 1]
+def test_temporal_split_returns_four_keys(minimal_train_df):
+    """temporal_split must return train, test, reference, and stream keys."""
+    splits = temporal_split(minimal_train_df)
+    assert set(splits.keys()) == {"train", "test", "reference", "stream"}
 
 
-def test_temporal_split_covers_all_rows(sample_transaction_df):
-    """All rows must be assigned to exactly one split."""
-    df = engineer_features(sample_transaction_df.copy())
-    splits = temporal_split(df)
+def test_temporal_split_covers_all_rows(minimal_train_df):
+    """temporal_split must assign every row to exactly one partition."""
+    splits = temporal_split(minimal_train_df)
     total = sum(len(s) for s in splits.values())
-    assert total == len(df)
+    assert total == len(minimal_train_df)
 
 
-@pytest.mark.requires_data
-def test_raw_data_schema():
-    """Raw CSV files must contain expected key columns."""
-    df_txn = pd.read_csv(cfg.RAW_TRANSACTION_FILE, nrows=5)
-    df_id = pd.read_csv(cfg.RAW_IDENTITY_FILE, nrows=5)
-    assert "TransactionID" in df_txn.columns
-    assert "TransactionID" in df_id.columns
-    assert "isFraud" in df_txn.columns
-    assert "TransactionDT" in df_txn.columns
+def test_temporal_split_no_overlap(minimal_train_df):
+    """temporal_split must produce non-overlapping partitions."""
+    from src.config import TIME_COL
+
+    splits = temporal_split(minimal_train_df)
+    train_max = pd.to_datetime(splits["train"][TIME_COL]).max()
+    test_min = pd.to_datetime(splits["test"][TIME_COL]).min()
+    assert train_max <= test_min
+
+
+def test_temporal_split_sizes(minimal_train_df):
+    """train split must contain approximately 75% of rows."""
+    splits = temporal_split(minimal_train_df)
+    n = len(minimal_train_df)
+    train_frac = len(splits["train"]) / n
+    assert 0.70 <= train_frac <= 0.80
+
+
+def test_build_card_stats_columns(minimal_train_df):
+    """build_card_stats must produce txn_count_7d, amt_mean_7d, amt_max_7d, txn_velocity_7d."""
+    stats = build_card_stats(minimal_train_df)
+    assert "txn_count_7d" in stats.columns
+    assert "amt_mean_7d" in stats.columns
+    assert "amt_max_7d" in stats.columns
+    assert "txn_velocity_7d" in stats.columns
+    assert "event_timestamp" in stats.columns
+
+
+def test_build_card_stats_one_row_per_card(minimal_train_df):
+    """build_card_stats must produce exactly one row per unique cc_num."""
+    stats = build_card_stats(minimal_train_df)
+    assert stats["cc_num"].nunique() == len(stats)
+
+
+def test_build_category_stats_columns(minimal_train_df):
+    """build_category_stats must include fraud rate and count columns."""
+    stats = build_category_stats(minimal_train_df)
+    assert "category_fraud_rate" in stats.columns
+    assert "category_fraud_count" in stats.columns
+    assert "category_txn_count" in stats.columns
+    assert "event_timestamp" in stats.columns
+
+
+def test_build_category_stats_rate_bounds(minimal_train_df):
+    """category_fraud_rate values must be in [0, 1]."""
+    stats = build_category_stats(minimal_train_df)
+    assert (stats["category_fraud_rate"] >= 0).all()
+    assert (stats["category_fraud_rate"] <= 1).all()

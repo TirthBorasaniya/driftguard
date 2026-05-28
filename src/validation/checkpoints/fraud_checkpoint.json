@@ -1,0 +1,12 @@
+{
+  "name": "fraud_checkpoint",
+  "suite": "fraud_pipeline",
+  "expectations": [
+    {"column": "amt", "checks": ["no_nulls", "positive"]},
+    {"column": "city_pop", "checks": ["no_nulls", "positive"]},
+    {"column": "category", "checks": ["cardinality_10_to_20"]},
+    {"column": "state", "checks": ["cardinality_40_to_60"]},
+    {"column": "is_fraud", "checks": ["rate_0.003_to_0.02"]},
+    {"column": "trans_num", "checks": ["uniqueness_100pct"]}
+  ]
+}

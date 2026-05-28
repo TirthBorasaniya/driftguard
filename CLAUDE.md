@@ -1,4 +1,4 @@
-# Real-Time Event-Driven ML Pipeline — Project Context for Claude Code
+# CLAUDE.md — Real-Time Event-Driven ML Pipeline (P1)
 
 ---
 
@@ -53,24 +53,24 @@ Target roles: MLE, MLOps, Data Engineer.
 
 ## Stack
 
-| Layer                     | Tool                               | Version   |
-|---------------------------|------------------------------------|-----------|
-| Streaming                 | Kafka (confluent-kafka)            | latest    |
-| Feature store             | Feast                              | 0.40.x    |
-| Online store              | Redis                              | 7.x       |
-| Model                     | LightGBM                           | 4.x       |
-| Experiment tracking       | MLflow                             | 2.12.x    |
-| Orchestration             | Prefect                            | 2.x       |
-| Data validation           | Great Expectations                 | latest    |
-| Drift detection           | Evidently AI                       | 0.4.30    |
-| Infrastructure monitoring | Prometheus + Grafana               | latest    |
-| API instrumentation       | prometheus-fastapi-instrumentator  | latest    |
-| Serving                   | FastAPI + Uvicorn                  | 0.111.x   |
-| Explainability            | SHAP                               | latest    |
-| Event validation          | Pydantic                           | 2.x       |
-| Infra                     | Docker Compose (no version:)       | latest    |
-| CI                        | GitHub Actions                     | —         |
-| Dataset                   | Synthetic Credit Card Transactions | Kaggle    |
+| Layer                     | Tool                               | Version   | Notes                                   |
+|---------------------------|------------------------------------|-----------|-----------------------------------------|
+| Streaming                 | Kafka (confluent-kafka)            | latest    | Docker Compose service                  |
+| Feature store             | Feast                              | 0.40.x    | Redis online store, Parquet offline     |
+| Online store              | Redis                              | 7.x       | AOF persistence enabled                 |
+| Model                     | LightGBM                           | 4.x       | Early stopping via callbacks only       |
+| Experiment tracking       | MLflow                             | 2.12.x    | SQLite backend, alias-based promotion   |
+| Orchestration             | Prefect                            | 2.x       | Must be < 3.0.0                         |
+| Data validation           | Great Expectations                 | latest    | First step in retraining loop           |
+| Drift detection           | Evidently AI                       | 0.4.30    | Pinned exactly — do not upgrade         |
+| Infrastructure monitoring | Prometheus + Grafana               | latest    | Separate from Evidently ML monitoring   |
+| API instrumentation       | prometheus-fastapi-instrumentator  | latest    |                                         |
+| Serving                   | FastAPI + Uvicorn                  | 0.111.x   | Lifespan context manager only           |
+| Explainability            | SHAP                               | latest    | TreeExplainer, top-5 contributions      |
+| Event validation          | Pydantic                           | 2.x       |                                         |
+| Infra                     | Docker Compose (no version:)       | latest    | Compose Specification format            |
+| CI                        | GitHub Actions                     | —         | ruff, mypy, pytest on push              |
+| Dataset                   | Synthetic Credit Card Transactions | Kaggle    | Brandon Harris / Sparkov simulator      |
 
 ---
 
@@ -198,8 +198,8 @@ cycle. Evidently's KS test and PSI are unreliable on small windows.
 1. Run Great Expectations validation suite on incoming training data
 2. Abort if validation fails — log failed expectations, do not proceed
 3. Materialize features from Feast offline store
-4. Load training data
-5. Train LightGBM challenger
+4. Load training data with temporal split enforced
+5. Train LightGBM challenger with scale_pos_weight=172
 6. Evaluate challenger on held-out test set (AUC-PR, F2-score at optimized threshold)
 7. Load champion metrics from artifact JSON (not MLflow API — avoids API dependency)
 8. Compare AUC-PR: challenger wins if improvement > 0.01
@@ -221,11 +221,9 @@ demonstrates awareness of real-world ML deployment constraints.
 **Infrastructure monitoring:** Add `prometheus-fastapi-instrumentator` to
 the FastAPI serving layer. Exposes `/metrics` endpoint automatically.
 Prometheus scrapes this endpoint on a 15-second interval. Grafana is
-provisioned via `monitoring/grafana/provisioning/` with a dashboard covering:
-- Request rate (requests per second by endpoint)
-- p50, p95, p99 response latency
-- HTTP error rate (4xx and 5xx separately)
-- Prediction throughput (fraud vs non-fraud counts per minute)
+provisioned via `monitoring/grafana/provisioning/` with two dashboards:
+- `infra.json`: request rate, p50/p95/p99 latency, HTTP error rate by code
+- `ml_health.json`: prediction throughput, fraud rate over time, drift alert events
 
 This separates concerns correctly: Evidently owns ML health (did the data
 distribution change?), Prometheus and Grafana own infrastructure health
@@ -266,9 +264,9 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup
+    # startup: load model, encoders, threshold
     yield
-    # shutdown
+    # shutdown: release resources
 
 app = FastAPI(lifespan=lifespan)
 ```
@@ -281,6 +279,13 @@ docker-compose.yml entirely.
 Do not upgrade. Install explicitly:
 ```
 evidently==0.4.30
+```
+
+**aiosqlite WAL mode:** Enable WAL explicitly after connection to prevent
+locking under concurrent FastAPI requests:
+```python
+async with aiosqlite.connect("predictions.db") as db:
+    await db.execute("PRAGMA journal_mode=WAL")
 ```
 
 ---
@@ -297,10 +302,11 @@ realtime-fraud-pipeline/
 ├── docker-compose.yml
 │
 ├── data/
-│   ├── raw/                          # source CSVs: fraudTrain.csv, fraudTest.csv (gitignored)
-│   ├── processed/                    # cleaned, feature-engineered dataset
+│   ├── raw/                          # fraudTrain.csv, fraudTest.csv (gitignored)
+│   ├── processed/                    # train.parquet, test.parquet after preprocessing
+│   ├── reference/                    # Evidently AI reference dataset (training distribution)
 │   ├── encoders/                     # fitted custom encoder objects (.pkl)
-│   └── drift_scenarios/              # drift injection config files
+│   └── drift_scenarios/              # drift injection config files (heavy_drift.json)
 │
 ├── monitoring/
 │   └── grafana/
@@ -308,7 +314,8 @@ realtime-fraud-pipeline/
 │           ├── datasources/
 │           │   └── prometheus.yml    # Prometheus datasource config
 │           └── dashboards/
-│               └── fraud_pipeline.json  # provisioned Grafana dashboard
+│               ├── infra.json        # request rate, latency, error rate panels
+│               └── ml_health.json    # fraud rate, drift events, prediction throughput
 │
 ├── src/
 │   ├── config.py                     # pydantic-settings: all env vars and constants
@@ -316,16 +323,16 @@ realtime-fraud-pipeline/
 │   ├── data/
 │   │   ├── __init__.py
 │   │   ├── preprocess.py             # feature engineering, derived features, custom encoder, temporal split
-│   │   └── encoders.py               # custom encoder with unseen-category fallback bin
+│   │   └── encoders.py               # custom encoder with unseen-category fallback bin (-1)
 │   │
 │   ├── validation/
 │   │   ├── __init__.py
-│   │   ├── expectations.py           # Great Expectations suite: value ranges, nulls, cardinality, label rate
+│   │   ├── expectations.py           # GE suite: amt, city_pop, category cardinality, fraud rate, trans_num uniqueness
 │   │   └── checkpoints/              # GE checkpoint configs (committed to repo)
 │   │
 │   ├── producer/
 │   │   ├── __init__.py
-│   │   ├── kafka_producer.py         # chronological replay of transactions as Kafka stream
+│   │   ├── kafka_producer.py         # chronological replay of stream.parquet as Kafka events
 │   │   └── drift_injector.py         # drift mode: amt scaling, category shift, state concentration
 │   │
 │   ├── consumer/
@@ -348,19 +355,19 @@ realtime-fraud-pipeline/
 │   │   ├── __init__.py
 │   │   ├── train.py                  # LightGBM training, MLflow logging, champion alias promotion
 │   │   ├── evaluate.py               # AUC-PR, F2-score, threshold optimization on PRC
-│   │   └── threshold.py              # F2 operating point computation
+│   │   └── threshold.py              # F2 operating point computation, JSON artifact write
 │   │
 │   ├── serving/
 │   │   ├── __init__.py
 │   │   ├── main.py                   # FastAPI lifespan, router mount, Prometheus instrumentation
 │   │   ├── routes.py                 # /predict, /predict/explain, /health, /metrics
 │   │   ├── schemas.py                # Pydantic request/response models
-│   │   ├── model_loader.py           # MLflow model + threshold loading by alias
+│   │   ├── model_loader.py           # MLflow model + threshold loading by @champion alias
 │   │   └── explainer.py              # SHAP TreeExplainer wrapper, top-5 contributions
 │   │
 │   ├── monitoring/
 │   │   ├── __init__.py
-│   │   ├── drift_detector.py         # Evidently windowed drift reports, 500-event guard
+│   │   ├── drift_detector.py         # Evidently windowed drift reports, 500-event minimum guard
 │   │   └── alert_handler.py          # Prefect flow trigger on drift threshold breach
 │   │
 │   └── orchestration/
@@ -390,7 +397,7 @@ realtime-fraud-pipeline/
 - `_dict` suffix on key-value mappings (e.g., `feature_dict`)
 - `_list` suffix on lists of items per group (e.g., `cat_cols_list`)
 - No emojis, no em dashes
-- Formal technical language
+- Formal technical language throughout
 - Imports in three groups separated by blank line: stdlib, third-party, local
 - Module-level docstring on every file (one to two sentences)
 - f-strings for all string formatting
@@ -403,20 +410,20 @@ realtime-fraud-pipeline/
 - [x] Part 1: Project scaffold — pyproject.toml, requirements.txt, .env.example, config.py
 - [x] Part 2: Data pipeline — load fraudTrain.csv, engineer derived features, custom encoder, temporal split at 75th percentile
 - [x] Part 3: Great Expectations suite — expectations on amt, city_pop, category cardinality, state cardinality, is_fraud rate, trans_num uniqueness
-- [x] Part 4: Feast feature store — feature_store.yaml, cc_num entity, two feature views (cc_num rolling stats + category fraud rate), feast apply
+- [x] Part 4: Feast feature store — feature_store.yaml, cc_num entity, two feature views (rolling cc_num stats + category fraud rate), feast apply
 - [x] Part 5: Feature materialization — offline store population from processed data
-- [x] Part 6: LightGBM training — scale_pos_weight=172, categorical_feature indices, early stopping callbacks, MLflow logging, champion alias
+- [x] Part 6: LightGBM training — scale_pos_weight=172, categorical_feature indices, early stopping via callbacks, MLflow logging, champion alias
 - [x] Part 7: Threshold optimization — F2 on PRC, store as artifact JSON alongside model binary
 - [x] Part 8: FastAPI serving — lifespan, prometheus-fastapi-instrumentator, /predict, /predict/explain (SHAP top-5), /health
-- [x] Part 9: Kafka producer — chronological replay of stream.parquet, drift injection mode (heavy_drift.json)
-- [x] Part 10: Kafka consumer — Pydantic TransactionEvent validation, DLQ for malformed events, manual offset commit
+- [x] Part 9: Kafka producer — chronological replay of stream.parquet, drift injection mode
+- [x] Part 10: Kafka consumer — Pydantic TransactionEvent validation, DLQ for malformed events, manual offset commit, aiosqlite WAL logging
 - [x] Part 11: Evidently drift detector — 500-event minimum window guard, StreamingDriftDetector class
 - [x] Part 12: Prefect retraining flow — GE validation as step 1 (abort on failure), 9-step loop, conditional MLflow alias promotion
-- [x] Part 13: Prometheus + Grafana — two provisioned dashboards (infra.json + ml_health.json), all metrics
+- [x] Part 13: Prometheus + Grafana — two provisioned dashboards (infra.json + ml_health.json)
 - [x] Part 14: Docker Compose — kafka, zookeeper, redis (AOF), api, prometheus, grafana with health checks
 - [x] Part 15: GitHub Actions CI — ruff, mypy, pytest on push
-- [x] Part 16: Latency benchmark — locust locustfile.py with /predict load test
-- [ ] Part 17: Download fraudTrain.csv + fraudTest.csv, run pipeline end-to-end, commit artifacts
+- [x] Part 16: Latency benchmark — locust locustfile.py targeting /predict
+- [ ] Part 17: Download fraudTrain.csv + fraudTest.csv, run pipeline end-to-end, verify all dashboards
 
 Update checkboxes as parts are completed.
 
@@ -448,19 +455,19 @@ uvicorn src.serving.main:app --reload --host 0.0.0.0 --port 8000
 # MLflow UI
 mlflow ui --backend-store-uri sqlite:///mlruns/mlflow.db --port 5000
 
-# Kafka producer (normal mode — chronological replay)
+# Kafka producer (normal mode)
 python -m src.producer.kafka_producer
 
-# Kafka producer (drift mode — configurable distributional shifts)
+# Kafka producer (drift injection mode)
 python -m src.producer.kafka_producer --drift
 
-# Consumer
+# Kafka consumer
 python -m src.consumer.kafka_consumer
 
 # Drift detection
 python -m src.monitoring.drift_detector
 
-# Retraining flow
+# Prefect retraining flow
 python -m src.orchestration.flows.retraining_flow
 
 # Full stack
@@ -470,14 +477,17 @@ docker compose up --build
 pytest tests/ -v
 
 # Latency benchmark
-hey -n 1000 -c 50 http://localhost:8000/predict
+locust -f locustfile.py --host=http://localhost:8000
 
 # Verify Prometheus metrics endpoint
 curl http://localhost:8000/metrics
 
-# Verify Great Expectations install
+# Verify Great Expectations
 python -c "import great_expectations as ge; print(ge.__version__)"
 
-# Verify Redis persistence config
+# Verify Redis AOF persistence
 docker exec -it redis redis-cli CONFIG GET appendonly
+
+# Verify Evidently version is exactly 0.4.30
+python -c "import evidently; print(evidently.__version__)"
 ```
