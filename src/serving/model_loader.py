@@ -2,11 +2,11 @@
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
 
 import joblib
 import mlflow
 import mlflow.lightgbm
+import mlflow.tracking
 
 from src.config import (
     CATEGORICAL_COLS,
@@ -28,15 +28,16 @@ class ModelBundle:
     encoders: dict[str, SafeLabelEncoder]
     feature_cols: list[str]
     version: str
-    model_mtime: float
+    model_mtime: float  # MLflow version number (float) or file mtime for fallback
 
 
 def load_champion() -> ModelBundle:
     """
-    Load the champion model, F2 threshold, and encoders from disk.
+    Load the champion model, F2 threshold, and encoders.
 
-    Tries MLflow alias first, falls back to local production_model.pkl.
-    Threshold is always loaded from threshold.json artifact.
+    Primary path: MLflow model registry via @champion alias.
+    Fallback path: local production_model.pkl if MLflow registry is unavailable.
+    Threshold is always loaded from threshold.json artifact on disk.
 
     Returns
     -------
@@ -46,14 +47,32 @@ def load_champion() -> ModelBundle:
     version = "none"
     model_mtime = 0.0
 
-    if PRODUCTION_MODEL_PATH.exists():
-        model = joblib.load(PRODUCTION_MODEL_PATH)
-        model_mtime = PRODUCTION_MODEL_PATH.stat().st_mtime
-        from datetime import datetime
-        version = datetime.fromtimestamp(model_mtime).strftime("%Y%m%d-%H%M%S")
-        print(f"Loaded model: {PRODUCTION_MODEL_PATH.name} (version {version})")
-    else:
-        print(f"WARNING: model not found at {PRODUCTION_MODEL_PATH}")
+    mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+
+    # Primary: load via @champion alias from MLflow model registry
+    try:
+        model_uri = f"models:/{settings.mlflow_model_name}@{settings.mlflow_champion_alias}"
+        model = mlflow.lightgbm.load_model(model_uri)
+        client = mlflow.tracking.MlflowClient()
+        version_info = client.get_model_version_by_alias(
+            settings.mlflow_model_name,
+            settings.mlflow_champion_alias,
+        )
+        version = version_info.version
+        model_mtime = float(version)
+        print(f"Loaded champion from MLflow registry: version {version}")
+    except Exception as mlflow_err:
+        print(f"MLflow load failed ({mlflow_err}), falling back to local model")
+        # Fallback: local joblib written by training pipeline
+        if PRODUCTION_MODEL_PATH.exists():
+            from datetime import datetime
+
+            model = joblib.load(PRODUCTION_MODEL_PATH)
+            model_mtime = PRODUCTION_MODEL_PATH.stat().st_mtime
+            version = datetime.fromtimestamp(model_mtime).strftime("%Y%m%d-%H%M%S")
+            print(f"Loaded fallback model: {PRODUCTION_MODEL_PATH.name} (version {version})")
+        else:
+            print("WARNING: no model available — MLflow registry and local disk both failed")
 
     threshold = 0.5
     if THRESHOLD_PATH.exists():

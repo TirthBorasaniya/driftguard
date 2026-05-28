@@ -2,19 +2,20 @@
 
 import asyncio
 import os
+import time
 from contextlib import asynccontextmanager
 
 import aiosqlite
+import mlflow
+import mlflow.tracking
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from src.config import DB_PATH, PRODUCTION_MODEL_PATH, settings
-from src.serving.model_loader import load_champion
+from src.config import DB_PATH, settings
 from src.serving.explainer import SHAPExplainer
+from src.serving.model_loader import load_champion
 from src.serving.routes import router
-
-import time
 
 
 # ============= Database Initialisation =============
@@ -65,21 +66,26 @@ async def init_db() -> None:
 
 
 async def hot_reload_loop(app: FastAPI) -> None:
-    """Poll model file mtime every 60 seconds and reload on change."""
+    """Poll MLflow registry every 60 seconds and reload when @champion version changes."""
     while True:
         await asyncio.sleep(60)
         try:
-            if PRODUCTION_MODEL_PATH.exists():
-                mtime = PRODUCTION_MODEL_PATH.stat().st_mtime
-                if mtime > app.state.bundle.model_mtime:
-                    app.state.bundle = load_champion()
-                    try:
-                        app.state.explainer = SHAPExplainer(app.state.bundle.model)
-                    except Exception:
-                        app.state.explainer = None
-                    print(f"Hot-reloaded model: version {app.state.bundle.version}")
+            mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+            client = mlflow.tracking.MlflowClient()
+            version_info = client.get_model_version_by_alias(
+                settings.mlflow_model_name,
+                settings.mlflow_champion_alias,
+            )
+            current_version = float(version_info.version)
+            if current_version != app.state.bundle.model_mtime:
+                app.state.bundle = load_champion()
+                try:
+                    app.state.explainer = SHAPExplainer(app.state.bundle.model)
+                except Exception:
+                    app.state.explainer = None
+                print(f"Hot-reloaded model: version {app.state.bundle.version}")
         except Exception as e:
-            print(f"Hot-reload error: {e}")
+            print(f"Hot-reload check failed (non-fatal): {e}")
 
 
 # ============= Lifespan =============
