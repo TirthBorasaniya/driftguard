@@ -9,7 +9,7 @@ import aiosqlite
 import numpy as np
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from src.config import DB_PATH, FEATURE_COLS
+from src.config import DB_PATH, FEATURE_COLS, SHADOW_LOG_PATH
 from src.features.engineering import compute_features
 from src.serving.schemas import (
     ExplainResponse,
@@ -18,6 +18,7 @@ from src.serving.schemas import (
     NetworkFlowRequest,
     PredictionResponse,
 )
+from src.serving.shadow_mode import log_shadow_prediction, score_shadow_mode
 
 router = APIRouter()
 
@@ -155,6 +156,21 @@ async def predict(
         },
     )
     request.app.state.prediction_count += 1
+
+    # shadow mode: score with the challenger too, log only, serve champion only
+    if bundle.challenger_model is not None:
+        feature_dict = compute_features(flow.model_dump())
+        champion_pred, challenger_pred = score_shadow_mode(
+            bundle.model, bundle.challenger_model, feature_dict
+        )
+        background_tasks.add_task(
+            log_shadow_prediction,
+            str(SHADOW_LOG_PATH),
+            champion_pred,
+            challenger_pred,
+            champion_pred >= bundle.threshold,
+            challenger_pred >= bundle.threshold,
+        )
 
     return PredictionResponse(
         event_id=event_id,

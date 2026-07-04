@@ -29,6 +29,7 @@ class ModelBundle:
     feature_cols: list[str]
     version: str
     model_mtime: float  # MLflow version number (float) or file mtime for fallback
+    challenger_model: object | None = None
 
 
 def load_champion() -> ModelBundle:
@@ -97,4 +98,23 @@ def load_champion() -> ModelBundle:
         feature_cols=FEATURE_COLS,
         version=version,
         model_mtime=model_mtime,
+        challenger_model=load_challenger(),
     )
+
+
+def load_challenger() -> object | None:
+    """
+    Load the challenger model via the MLflow @challenger alias, for shadow
+    mode scoring. Returns None if no challenger has been registered.
+
+    Returns
+    -------
+    challenger_model : object or None
+    """
+    try:
+        model_uri = f"models:/{settings.mlflow_model_name}@{settings.mlflow_challenger_alias}"
+        challenger_model = mlflow.lightgbm.load_model(model_uri)
+        print("Loaded challenger for shadow mode scoring")
+        return challenger_model
+    except Exception:
+        return None

@@ -309,3 +309,49 @@ the spec with justification. Sections are added as each improvement is completed
 - Deviation: `add_bounded_expectations` operates on a plain dict rather than a real GE
   `ExpectationSuite` object, consistent with the rest of this repo's hand-rolled
   validation suite (documented as a Phase 1 technical decision).
+
+## 5. Idempotent Consumer with Redis Dedup (Tier 2)
+- Audit finding: MISSING. No Redis usage in `flow_consumer.py` at all.
+- Implemented: new `src/consumer/dedup.py` with `DEDUP_KEY_PREFIX = "processed_event:"`,
+  `DEDUP_TTL_SECONDS = 3600`, and `is_duplicate_event(redis_client, event_id,
+  dedup_key_prefix, dedup_ttl_seconds)` using `redis-py`'s `SET key val EX ttl NX` for
+  atomic check-and-mark. Wired into `src/consumer/flow_consumer.py`'s main loop as step 4
+  (renumbering the docstring's processing steps to 9 total), immediately after DLQ
+  validation and before feature computation as specified: on a duplicate, the offset is
+  committed and the message is skipped without reprocessing.
+- Tests: `tests/test_dedup.py` — asserts `is_duplicate_event` returns `False` on first
+  call and `True` on a second call with the same `event_id`; different `event_id`s are
+  independent; the Redis key uses `DEDUP_KEY_PREFIX`. Uses an in-memory `FakeRedis`
+  implementing `SET ... EX ... NX` semantics rather than a live Redis server; skipped via
+  `pytest.importorskip("redis")` locally, runs on CI.
+- Deviation: none.
+
+## 6. Shadow Mode Champion-Challenger (Tier 2)
+- Audit finding: MISSING. The pre-existing `healing_mode="SHADOW"` string in
+  `alert_handler.py` is an unrelated concept (retrain-and-register-as-challenger-only,
+  not live dual-model scoring) and was left untouched per the user's explicit
+  instruction.
+- Implemented: new `src/serving/shadow_mode.py` with `SHADOW_MODE_MIN_EVENTS = 500`,
+  `SHADOW_DIVERGENCE_THRESHOLD = 0.05`, `score_shadow_mode(champion_model,
+  challenger_model, feature_dict)` (returns both predicted probabilities, champion
+  first), `log_shadow_prediction` (appends a prediction pair plus each model's binary
+  decision to a CSV shadow log), and `evaluate_shadow_divergence(shadow_log_path,
+  min_events, divergence_threshold)` (disagreement-rate gate for promotion). Wired
+  minimally into serving: `src/serving/model_loader.py` gains `load_challenger()`
+  (loads the MLflow `@challenger` alias, returns `None` if none is registered) and
+  `ModelBundle.challenger_model`; `src/serving/routes.py`'s `/predict` endpoint scores
+  the challenger in the background and logs the pair to `SHADOW_LOG_PATH`
+  (`models/shadow_predictions.csv`) whenever a challenger is loaded, without changing
+  the response served to the client (champion prediction only).
+- Tests: `tests/test_shadow_mode.py` — asserts `score_shadow_mode` returns both
+  predictions without raising when the models disagree; `evaluate_shadow_divergence`
+  rejects below `SHADOW_MODE_MIN_EVENTS`, approves low disagreement, rejects high
+  disagreement. All pass locally (no optional dependency required).
+- Deviation: the live-traffic wiring uses a CSV log rather than the SQLite predictions
+  database, since the spec's `evaluate_shadow_divergence` signature takes a
+  `shadow_log_path` (file path), not a database handle; this keeps the promotion-gate
+  read path dependency-free (no async DB driver needed in the offline evaluation
+  script). The challenger-scoring code path itself (loading via MLflow, calling
+  `score_shadow_mode` inside `/predict`) was not exercised end-to-end since FastAPI and
+  MLflow are not installed in this environment — only the standalone functions were
+  test-verified.

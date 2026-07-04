@@ -92,6 +92,7 @@ PRODUCTION_MODEL_PATH = MODELS_DIR / "production_model.pkl"
 THRESHOLD_PATH = MODELS_DIR / "threshold.json"
 CHAMPION_METRICS_PATH = MODELS_DIR / "champion_metrics.json"
 FEATURE_COLS_PATH = MODELS_DIR / "feature_cols.json"
+SHADOW_LOG_PATH = MODELS_DIR / "shadow_predictions.csv"
 
 # database
 DB_PATH = PROJECT_ROOT / "predictions.db"

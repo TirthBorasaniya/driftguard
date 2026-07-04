@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from confluent_kafka import Consumer, KafkaError, Producer
 from pydantic import ValidationError
+from redis import Redis
 
 from src.config import (
     DB_PATH,
@@ -18,6 +19,7 @@ from src.config import (
     THRESHOLD_PATH,
     settings,
 )
+from src.consumer.dedup import is_duplicate_event
 from src.consumer.dlq_handler import route_to_dlq
 from src.consumer.schemas import NetworkFlowEvent
 from src.features.engineering import compute_features
@@ -92,11 +94,12 @@ def run_consumer() -> None:
     1. Deserialize JSON
     2. Validate with NetworkFlowEvent Pydantic model
     3. On ValidationError: route to DLQ, continue
-    4. Compute features via feature engineering (single source of truth)
-    5. Run model inference, apply calibrated threshold
-    6. Log prediction to SQLite (keyed by src_ip entity / event_id)
-    7. Feed event into drift detector window buffer
-    8. Manually commit offset (enable.auto.commit=False)
+    4. Check Redis dedup guard on event_id; skip reprocessing if already seen
+    5. Compute features via feature engineering (single source of truth)
+    6. Run model inference, apply calibrated threshold
+    7. Log prediction to SQLite (keyed by src_ip entity / event_id)
+    8. Feed event into drift detector window buffer
+    9. Manually commit offset (enable.auto.commit=False)
     """
     if not PRODUCTION_MODEL_PATH.exists():
         raise FileNotFoundError(
@@ -123,6 +126,7 @@ def run_consumer() -> None:
     consumer.subscribe([settings.kafka_topic])
 
     dlq_producer = Producer({"bootstrap.servers": settings.kafka_bootstrap_servers})
+    redis_client = Redis(host=settings.redis_host, port=settings.redis_port)
 
     model_version = datetime.fromtimestamp(
         PRODUCTION_MODEL_PATH.stat().st_mtime
@@ -156,13 +160,18 @@ def run_consumer() -> None:
 
             event_dict = event.model_dump()
 
-            # steps 4-5: compute features and infer
+            # step 4: idempotency guard, skip reprocessing on consumer restart
+            if is_duplicate_event(redis_client, event_dict["event_id"]):
+                consumer.commit(asynchronous=False)
+                continue
+
+            # steps 5-6: compute features and infer
             feature_dict = compute_features(event_dict)
             features = build_feature_vector(feature_dict)
             anomaly_proba = float(model.predict_proba(features)[0, 1])
             is_anomaly = anomaly_proba >= threshold
 
-            # step 6: log prediction keyed by the event entity (src_ip)
+            # step 7: log prediction keyed by the event entity (src_ip)
             log_prediction_sync({
                 "event_id": event_dict["event_id"],
                 "anomaly_score": anomaly_proba,
@@ -172,10 +181,10 @@ def run_consumer() -> None:
                 "timestamp": datetime.utcnow().isoformat(),
             })
 
-            # step 7: feed drift detector with raw fields plus engineered features
+            # step 8: feed drift detector with raw fields plus engineered features
             drift_detector.add_event({**event_dict, **feature_dict})
 
-            # step 8: commit offset only after full processing
+            # step 9: commit offset only after full processing
             consumer.commit(asynchronous=False)
 
             processed += 1
