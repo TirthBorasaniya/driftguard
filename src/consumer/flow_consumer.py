@@ -128,6 +128,19 @@ def run_consumer() -> None:
     dlq_producer = Producer({"bootstrap.servers": settings.kafka_bootstrap_servers})
     redis_client = Redis(host=settings.redis_host, port=settings.redis_port)
 
+    avro_deserializer = None
+    deserialize_errors: tuple = (json.JSONDecodeError, ValidationError, UnicodeDecodeError)
+    try:
+        from confluent_kafka.serialization import SerializationError
+
+        from src.schemas.registry import build_avro_deserializer
+
+        avro_deserializer = build_avro_deserializer()
+        deserialize_errors = (ValidationError, SerializationError)
+        print("Schema Registry available: deserializing events as Avro")
+    except Exception as e:
+        print(f"Schema Registry unavailable ({e}), falling back to plain JSON")
+
     model_version = datetime.fromtimestamp(
         PRODUCTION_MODEL_PATH.stat().st_mtime
     ).strftime("%Y%m%d-%H%M%S")
@@ -151,9 +164,16 @@ def run_consumer() -> None:
 
             # step 1-3: deserialize and validate
             try:
-                payload = json.loads(raw.decode("utf-8"))
+                if avro_deserializer is not None:
+                    from confluent_kafka.serialization import MessageField, SerializationContext
+
+                    payload = avro_deserializer(
+                        raw, SerializationContext(settings.kafka_topic, MessageField.VALUE)
+                    )
+                else:
+                    payload = json.loads(raw.decode("utf-8"))
                 event = NetworkFlowEvent(**payload)
-            except (json.JSONDecodeError, ValidationError, UnicodeDecodeError) as e:
+            except deserialize_errors as e:
                 route_to_dlq(dlq_producer, raw, str(e))
                 consumer.commit(asynchronous=False)
                 continue

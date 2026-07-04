@@ -26,6 +26,7 @@ great-expectations==0.18.19
 
 # Streaming
 confluent-kafka==2.4.0
+fastavro==1.9.4
 
 # Serving
 fastapi==0.111.0

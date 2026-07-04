@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     kafka_dlq_topic: str = "network_flows.dlq"
     kafka_group_id: str = "network-flow-consumer"
 
+    # Schema Registry
+    schema_registry_url: str = "http://localhost:8081"
+
     # Redis
     redis_host: str = "localhost"
     redis_port: int = 6379

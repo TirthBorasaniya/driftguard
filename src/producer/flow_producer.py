@@ -187,6 +187,7 @@ def replay_dataset(
     file_list: list[str],
     column_map: dict[str, str],
     replay_rate_eps: int,
+    avro_serializer=None,
 ) -> None:
     """
     Replay all CICIDS2017 files through the Kafka producer in temporal order
@@ -204,8 +205,14 @@ def replay_dataset(
         Field mapping from raw CSV columns to schema fields.
     replay_rate_eps : int
         Target replay rate in events per second.
+    avro_serializer : AvroSerializer or None
+        Registry-aware Avro serializer. When provided, events are serialized
+        via the Schema Registry instead of plain JSON.
     """
     from pathlib import Path
+
+    if avro_serializer is not None:
+        from confluent_kafka.serialization import MessageField, SerializationContext
 
     delay_seconds = 1.0 / replay_rate_eps if replay_rate_eps > 0 else 0.0
     sent = 0
@@ -222,9 +229,15 @@ def replay_dataset(
 
         for _, row in df.iterrows():
             event = build_flow_event(row)
+            if avro_serializer is not None:
+                value = avro_serializer(
+                    event, SerializationContext(KAFKA_TOPIC, MessageField.VALUE)
+                )
+            else:
+                value = json.dumps(event).encode("utf-8")
             producer.produce(
                 topic=KAFKA_TOPIC,
-                value=json.dumps(event).encode("utf-8"),
+                value=value,
                 callback=delivery_callback,
             )
             producer.poll(0)
@@ -252,6 +265,16 @@ def run_producer(replay_rate_eps: int = REPLAY_RATE_EPS) -> None:
     # confluent_kafka native client installed
     from confluent_kafka import Producer
 
+    from src.schemas.registry import build_avro_serializer, register_schema
+
+    avro_serializer = None
+    try:
+        register_schema()
+        avro_serializer = build_avro_serializer()
+        print("Schema Registry available: serializing events as Avro")
+    except Exception as e:
+        print(f"Schema Registry unavailable ({e}), falling back to plain JSON")
+
     producer = Producer({"bootstrap.servers": settings.kafka_bootstrap_servers})
     try:
         replay_dataset(
@@ -260,6 +283,7 @@ def run_producer(replay_rate_eps: int = REPLAY_RATE_EPS) -> None:
             file_list=CICIDS_FILES_ORDERED,
             column_map=CICIDS_COLUMN_MAP,
             replay_rate_eps=replay_rate_eps,
+            avro_serializer=avro_serializer,
         )
     except KeyboardInterrupt:
         print("\nInterrupted by user.")

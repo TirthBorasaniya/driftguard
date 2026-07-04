@@ -355,3 +355,55 @@ the spec with justification. Sections are added as each improvement is completed
   `score_shadow_mode` inside `/predict`) was not exercised end-to-end since FastAPI and
   MLflow are not installed in this environment — only the standalone functions were
   test-verified.
+
+## 7. Confluent Schema Registry (Tier 3)
+- Audit finding: MISSING. `docker-compose.yml` had no `schema-registry` service; no
+  registry code anywhere in `src/`; producer/consumer serialized plain JSON despite the
+  static `.avsc` file existing.
+- Implemented: added a `schema-registry` service (`confluentinc/cp-schema-registry`,
+  port 8081, health-checked) to `docker-compose.yml`, wired the `api` service to depend
+  on it and read `SCHEMA_REGISTRY_URL`. New `src/schemas/registry.py` with
+  `SCHEMA_REGISTRY_URL`, `SUBJECT_NAME = "network_flows-value"`, `register_schema`
+  matching the spec signature exactly, plus `build_avro_serializer`/
+  `build_avro_deserializer` factory helpers. `src/producer/flow_producer.py`'s
+  `run_producer` now registers the schema and builds an `AvroSerializer` at startup,
+  falling back to plain JSON (with a printed warning) if the registry is unreachable;
+  `replay_dataset` takes an optional `avro_serializer` and uses it when present.
+  `src/consumer/flow_consumer.py` mirrors this with `build_avro_deserializer` and a
+  `SerializationError`-aware except clause. Added `fastavro` to `requirements.txt`
+  (required by `confluent_kafka.schema_registry.avro`).
+- Tests: `tests/test_schema_registry.py` — asserts `register_schema` returns a positive
+  integer schema ID, skipped both when `confluent_kafka.schema_registry` is unavailable
+  and when no live registry is reachable at `SCHEMA_REGISTRY_URL` (this test genuinely
+  requires the Docker Compose `schema-registry` service running; it is not mockable
+  without testing against a fake registry implementation).
+- Deviation: producer/consumer fall back to JSON when the registry is unreachable
+  rather than failing hard, consistent with this repo's existing resilience pattern
+  (e.g. `model_loader.py`'s MLflow-then-local-file fallback) so local development
+  without the full Docker Compose stack still works.
+
+## 8. Feast Offline Materialization (Tier 3)
+- Audit finding: PARTIAL. `src/features/materializer.py` existed but only wrapped
+  `feast apply` and `feast materialize-incremental` (online store push); no distinct
+  offline-only path, and `src/orchestration/flows/materialization_flow.py` did not
+  exist as a standalone file (only an unrelated `materialization_flow()` function
+  inside `retraining_flow.py` that also just calls the online materializer).
+- Implemented: `src/features/materializer.py` adds `MATERIALIZATION_LOOKBACK_HOURS = 24`
+  and `materialize_offline_features(feast_repo_path, lookback_hours)` matching the spec
+  signature. It builds a point-in-time correct query against the offline store: reads
+  the per-`src_ip` offline parquet table, takes the most recent `event_timestamp` per
+  `src_ip` within the lookback window as an entity dataframe, and calls
+  `FeatureStore.get_historical_features(...).to_df()` — Feast's point-in-time join
+  against the offline store, which never touches the online Redis store used at serving
+  time. Created `src/orchestration/flows/materialization_flow.py` as a new file with a
+  `offline-materialization-flow` Prefect flow wrapping this function, kept distinctly
+  named from the pre-existing `materialization_flow()` in `retraining_flow.py` (which
+  refreshes the online store) to avoid a name collision or conflating the two paths.
+- Tests: `tests/test_materialization.py` — asserts `materialize_offline_features`
+  completes without error against a populated offline parquet fixture and returns a
+  non-empty DataFrame containing `src_ip`. Skipped via `pytest.importorskip("feast")`
+  locally; runs on CI.
+- Deviation: `materialize_offline_features` returns the resulting DataFrame (spec's
+  signature declares no return value) so both the flow and the test can inspect the
+  output directly, matching the spec's own test requirement ("produces a non-empty
+  output").

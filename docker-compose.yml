@@ -32,6 +32,23 @@ services:
       retries: 5
       start_period: 30s
 
+  schema-registry:
+    image: confluentinc/cp-schema-registry:latest
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   redis:
     image: redis:7
     command: redis-server --appendonly yes --appendfsync everysec
@@ -55,10 +72,13 @@ services:
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - REDIS_HOST=redis
+      - SCHEMA_REGISTRY_URL=http://schema-registry:8081
     depends_on:
       kafka:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      schema-registry:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
