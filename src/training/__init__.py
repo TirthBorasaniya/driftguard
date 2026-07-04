@@ -1,1 +1,1 @@
-"""LightGBM training, F2 threshold optimization, and MLflow experiment tracking."""
+"""LightGBM training, recall-calibrated threshold selection, and MLflow experiment tracking."""

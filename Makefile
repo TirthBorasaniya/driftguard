@@ -1,4 +1,4 @@
-.PHONY: setup data feast train serve producer consumer drift retrain test lint docker docker-down clean
+.PHONY: setup data reference feast train serve producer consumer retrain test lint docker docker-down clean
 
 setup:
 	python3.11 -m venv venv
@@ -6,6 +6,9 @@ setup:
 
 data:
 	python -m src.data.preprocess
+
+reference:
+	python scripts/generate_reference_dataset.py
 
 validate:
 	python -m src.validation.expectations
@@ -21,13 +24,10 @@ serve:
 	uvicorn src.serving.main:app --reload --host 0.0.0.0 --port 8000
 
 producer:
-	python -m src.producer.kafka_producer
-
-producer-drift:
-	python -m src.producer.kafka_producer --drift
+	python -m src.producer.flow_producer
 
 consumer:
-	python -m src.consumer.kafka_consumer
+	python -m src.consumer.flow_consumer
 
 retrain:
 	python -m src.orchestration.flows.retraining_flow

@@ -44,8 +44,8 @@
     }
   ],
   "schemaVersion": 39,
-  "tags": ["fraud-pipeline", "infrastructure"],
+  "tags": ["network-anomaly-pipeline", "infrastructure"],
   "time": {"from": "now-1h", "to": "now"},
   "title": "Infrastructure Health",
-  "uid": "fraud-infra"
+  "uid": "network-infra"
 }

@@ -1,4 +1,4 @@
-"""Dead letter queue handler: route malformed Kafka messages to transactions.dlq."""
+"""Dead letter queue handler: route malformed Kafka messages to the network_flows.dlq topic."""
 
 from confluent_kafka import Producer
 

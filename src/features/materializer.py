@@ -2,7 +2,6 @@
 
 import subprocess
 import sys
-from pathlib import Path
 
 from src.config import FEATURE_REPO_DIR
 

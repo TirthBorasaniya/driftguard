@@ -1,29 +1,24 @@
-"""Locust load test: measures p50/p95/p99 latency for /predict endpoint."""
+"""Locust load test: measures p50/p95/p99 latency for the /predict endpoint."""
 
 from locust import HttpUser, between, task
 
 
 SAMPLE_PAYLOAD = {
-    "cc_num": "4532015112830366",
-    "merchant": "fraud_Rippin, Kub and Mann",
-    "category": "misc_net",
-    "amt": 149.62,
-    "gender": "F",
-    "city": "Henderson",
-    "state": "TX",
-    "zip": "76054",
-    "lat": 36.0788,
-    "long": -81.1781,
-    "city_pop": 35550,
-    "job": "Scientist, product/process development",
-    "dob": "1987-01-01",
-    "merch_lat": 36.011293,
-    "merch_long": -82.048315,
-    "trans_date_trans_time": "2020-06-21 12:14:25",
+    "flow_duration": 100000.0,
+    "flow_bytes_per_sec": 5000.0,
+    "flow_packets_per_sec": 50.0,
+    "total_fwd_packets": 10.0,
+    "total_bwd_packets": 8.0,
+    "packet_length_mean": 120.0,
+    "packet_length_std": 30.0,
+    "flow_iat_mean": 2000.0,
+    "syn_flag_count": 1.0,
+    "src_ip": "192.168.10.5",
+    "flow_id": "192.168.10.5-52.6.13.28-49158-443-6",
 }
 
 
-class FraudUser(HttpUser):
+class NetworkFlowUser(HttpUser):
     wait_time = between(0.05, 0.1)
 
     @task(10)

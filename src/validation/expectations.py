@@ -1,80 +1,100 @@
-"""Great Expectations validation suite: data quality checks run before every retraining cycle."""
+"""Great Expectations style validation suite: bounded data quality checks before retraining."""
 
 import json
 from pathlib import Path
 
 import pandas as pd
 
-from src.config import PROCESSED_DIR, TARGET_COL
+from src.config import FEATURE_COLS
+
+# ============= Suite Configuration =============
+
+SUITE_NAME = "network_flow_feature_suite"
+
+# the ten network flow feature columns subject to null-rate assertions
+NUMERICAL_FEATURE_COLS = list(FEATURE_COLS)
+
+MAX_NULL_RATE = 0.02  # at most 2% nulls per feature column
+MIN_ROW_COUNT = 10_000
+MAX_ROW_COUNT = 5_000_000
 
 
-# ============= Expectation Definitions =============
+# ============= Bounded Assertions =============
 
 
-def _check_no_nulls(df: pd.DataFrame, col: str, failures: list) -> None:
-    null_count = df[col].isna().sum()
-    if null_count > 0:
-        failures.append(f"{col}: {null_count} null values found (expected 0)")
-
-
-def _check_positive(df: pd.DataFrame, col: str, failures: list) -> None:
-    non_positive = (df[col].dropna() <= 0).sum()
-    if non_positive > 0:
-        failures.append(f"{col}: {non_positive} non-positive values (expected all > 0)")
-
-
-def _check_cardinality(
-    df: pd.DataFrame,
-    col: str,
-    min_card: int,
-    max_card: int,
-    failures: list,
-) -> None:
-    card = df[col].nunique()
-    if not (min_card <= card <= max_card):
-        failures.append(
-            f"{col}: cardinality {card} outside expected range [{min_card}, {max_card}]"
-        )
-
-
-def _check_label_rate(
-    df: pd.DataFrame,
-    col: str,
-    min_rate: float,
-    max_rate: float,
-    failures: list,
-) -> None:
-    rate = df[col].mean()
-    if not (min_rate <= rate <= max_rate):
-        failures.append(
-            f"{col}: fraud rate {rate:.4%} outside expected range "
-            f"[{min_rate:.4%}, {max_rate:.4%}]"
-        )
-
-
-def _check_uniqueness(df: pd.DataFrame, col: str, failures: list) -> None:
+def _check_null_rate(df: pd.DataFrame, col: str, max_null_rate: float, failures: list) -> None:
+    """Flag a column whose null rate exceeds max_null_rate."""
     if col not in df.columns:
+        failures.append(f"{col}: column missing from batch")
         return
-    dup_count = df[col].duplicated().sum()
-    if dup_count > 0:
-        failures.append(f"{col}: {dup_count} duplicate values (expected 100% unique)")
+    null_rate = float(df[col].isna().mean())
+    if null_rate > max_null_rate:
+        failures.append(
+            f"{col}: null rate {null_rate:.4%} exceeds maximum {max_null_rate:.4%}"
+        )
+
+
+def _check_row_count(df: pd.DataFrame, min_rows: int, max_rows: int, failures: list) -> None:
+    """Flag a batch whose row count falls outside the configured bounds."""
+    n = len(df)
+    if not (min_rows <= n <= max_rows):
+        failures.append(
+            f"row_count: {n} outside expected range [{min_rows}, {max_rows}]"
+        )
 
 
 # ============= Suite Runner =============
 
 
-def run_validation_suite(df: pd.DataFrame) -> tuple[bool, list[str]]:
+def validate_batch(
+    batch_df: pd.DataFrame,
+    feature_cols: list[str] | None = None,
+) -> tuple[bool, list[str]]:
     """
-    Run the fraud pipeline expectation suite against a dataframe.
+    Run the bounded network flow expectation suite against a feature batch.
 
     Expectations
     ------------
-    - amt > 0, no nulls
-    - city_pop > 0, no nulls
-    - category cardinality between 10 and 20
-    - state cardinality between 40 and 60
-    - is_fraud rate between 0.3% and 2.0%
-    - trans_num uniqueness = 100%
+    - each feature column null rate <= MAX_NULL_RATE (2%)
+    - table row count between MIN_ROW_COUNT and MAX_ROW_COUNT
+
+    Parameters
+    ----------
+    batch_df : pd.DataFrame
+        Feature batch to validate.
+    feature_cols : list[str] or None
+        Feature columns to apply null-rate assertions to. Defaults to
+        NUMERICAL_FEATURE_COLS.
+
+    Returns
+    -------
+    o_passed : bool
+        True if all expectations pass.
+    failures : list of str
+        Human-readable description of each failed expectation.
+    """
+    feature_cols = feature_cols if feature_cols is not None else NUMERICAL_FEATURE_COLS
+    failures: list[str] = []
+
+    _check_row_count(batch_df, MIN_ROW_COUNT, MAX_ROW_COUNT, failures)
+    for col in feature_cols:
+        _check_null_rate(batch_df, col, MAX_NULL_RATE, failures)
+
+    o_passed = len(failures) == 0
+
+    if o_passed:
+        print(f"Data validation [{SUITE_NAME}]: all expectations passed.")
+    else:
+        print(f"Data validation [{SUITE_NAME}] FAILED: {len(failures)} expectation(s) violated:")
+        for f in failures:
+            print(f"  - {f}")
+
+    return o_passed, failures
+
+
+def run_validation_suite(df: pd.DataFrame) -> tuple[bool, list[str]]:
+    """
+    Compatibility wrapper used by the Prefect retraining flow.
 
     Parameters
     ----------
@@ -83,44 +103,20 @@ def run_validation_suite(df: pd.DataFrame) -> tuple[bool, list[str]]:
 
     Returns
     -------
-    passed : bool
+    o_passed : bool
         True if all expectations pass.
     failures : list of str
-        Human-readable description of each failed expectation.
+        Description of each failed expectation.
     """
-    failures = []
-
-    _check_no_nulls(df, "amt", failures)
-    _check_positive(df, "amt", failures)
-
-    _check_no_nulls(df, "city_pop", failures)
-    _check_positive(df, "city_pop", failures)
-
-    _check_cardinality(df, "category", min_card=10, max_card=20, failures=failures)
-    _check_cardinality(df, "state", min_card=40, max_card=60, failures=failures)
-
-    _check_label_rate(df, TARGET_COL, min_rate=0.003, max_rate=0.02, failures=failures)
-
-    _check_uniqueness(df, "trans_num", failures)
-
-    passed = len(failures) == 0
-
-    if passed:
-        print("Data validation: all expectations passed.")
-    else:
-        print(f"Data validation FAILED: {len(failures)} expectation(s) violated:")
-        for f in failures:
-            print(f"  - {f}")
-
-    return passed, failures
+    return validate_batch(df)
 
 
 # ============= Checkpoint =============
 
 
-def save_checkpoint_config(output_dir: Path = None) -> None:
+def save_checkpoint_config(output_dir: Path | None = None) -> None:
     """
-    Save GE checkpoint configuration to disk for documentation.
+    Save the validation checkpoint configuration to disk for documentation.
 
     Parameters
     ----------
@@ -133,19 +129,16 @@ def save_checkpoint_config(output_dir: Path = None) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     checkpoint = {
-        "name": "fraud_checkpoint",
-        "suite": "fraud_pipeline",
+        "name": "network_flow_checkpoint",
+        "suite": SUITE_NAME,
         "expectations": [
-            {"column": "amt", "checks": ["no_nulls", "positive"]},
-            {"column": "city_pop", "checks": ["no_nulls", "positive"]},
-            {"column": "category", "checks": ["cardinality_10_to_20"]},
-            {"column": "state", "checks": ["cardinality_40_to_60"]},
-            {"column": "is_fraud", "checks": ["rate_0.003_to_0.02"]},
-            {"column": "trans_num", "checks": ["uniqueness_100pct"]},
-        ],
+            {"column": col, "checks": [f"null_rate_max_{MAX_NULL_RATE}"]}
+            for col in NUMERICAL_FEATURE_COLS
+        ]
+        + [{"table": "row_count", "checks": [f"between_{MIN_ROW_COUNT}_{MAX_ROW_COUNT}"]}],
     }
 
-    path = output_dir / "fraud_checkpoint.json"
+    path = output_dir / "network_flow_checkpoint.json"
     with open(path, "w") as f:
         json.dump(checkpoint, f, indent=2)
     print(f"Checkpoint config saved: {path}")
@@ -155,15 +148,14 @@ def save_checkpoint_config(output_dir: Path = None) -> None:
 
 
 if __name__ == "__main__":
-    import pandas as pd
     from src.config import TRAIN_FILE
 
     save_checkpoint_config()
 
     if TRAIN_FILE.exists():
         df = pd.read_parquet(TRAIN_FILE)
-        passed, failures = run_validation_suite(df)
-        if not passed:
+        o_passed, failures = run_validation_suite(df)
+        if not o_passed:
             raise SystemExit(1)
     else:
         print("Training data not found. Run preprocessing first.")

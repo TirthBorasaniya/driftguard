@@ -9,14 +9,14 @@ import aiosqlite
 import numpy as np
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from src.config import CATEGORICAL_COLS, DB_PATH, FEATURE_COLS, NUMERIC_COLS
-from src.features.engineering import engineer_single_event
+from src.config import DB_PATH, FEATURE_COLS
+from src.features.engineering import compute_features
 from src.serving.schemas import (
     ExplainResponse,
     FeatureContribution,
     HealthResponse,
+    NetworkFlowRequest,
     PredictionResponse,
-    TransactionRequest,
 )
 
 router = APIRouter()
@@ -34,7 +34,7 @@ try:
     )
     MODEL_CHAMPION_AUC_PR = Gauge(
         "model_champion_auc_pr",
-        "AUC-PR of the currently loaded champion model",
+        "PR-AUC of the currently loaded champion model",
     )
     MODEL_DRIFT_SCORE = Gauge(
         "model_drift_score",
@@ -52,43 +52,24 @@ except ImportError:
 # ============= Feature Preparation =============
 
 
-def build_feature_vector(request: TransactionRequest, bundle) -> np.ndarray:
+def build_feature_vector(request: NetworkFlowRequest) -> np.ndarray:
     """
-    Convert a TransactionRequest into a model-ready feature vector.
+    Convert a NetworkFlowRequest into a model-ready feature vector.
 
-    Applies the same transforms as preprocess.py via engineering.py,
-    then encodes categoricals with SafeLabelEncoders.
+    Applies the same compute_features transform as the training and consumer
+    paths (single source of truth), guaranteeing no training-serving skew.
 
     Parameters
     ----------
-    request : TransactionRequest
-    bundle : ModelBundle
+    request : NetworkFlowRequest
 
     Returns
     -------
     features : np.ndarray
-        Shape (1, n_features).
+        Shape (1, n_features), ordered by FEATURE_COLS.
     """
-    event = request.model_dump()
-    event = engineer_single_event(event)
-
-    # encode categoricals with fallback to -1 for unseen values
-    for col in CATEGORICAL_COLS:
-        enc = bundle.encoders.get(col)
-        if enc is not None:
-            import pandas as pd
-            encoded = enc.transform(pd.Series([str(event.get(col, ""))]))
-            event[col] = int(encoded.iloc[0])
-        else:
-            event[col] = -1
-
-    feature_values = []
-    for col in FEATURE_COLS:
-        val = event.get(col, -999)
-        if val is None or (isinstance(val, float) and np.isnan(val)):
-            val = -999.0
-        feature_values.append(float(val))
-
+    feature_dict = compute_features(request.model_dump())
+    feature_values = [float(feature_dict[col]) for col in FEATURE_COLS]
     return np.array([feature_values])
 
 
@@ -101,13 +82,13 @@ async def log_prediction_async(record: dict) -> None:
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute(
             """INSERT INTO predictions
-               (transaction_id, fraud_probability, is_fraud, threshold, model_version,
+               (event_id, anomaly_score, is_anomaly, threshold, model_version,
                 timestamp, features_json)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
-                record["transaction_id"],
-                record["fraud_probability"],
-                int(record["is_fraud"]),
+                record["event_id"],
+                record["anomaly_score"],
+                int(record["is_anomaly"]),
                 record["threshold"],
                 record["model_version"],
                 record["timestamp"],
@@ -135,47 +116,50 @@ async def health(request: Request) -> HealthResponse:
 
 @router.post("/predict", response_model=PredictionResponse)
 async def predict(
-    transaction: TransactionRequest,
+    flow: NetworkFlowRequest,
     request: Request,
     background_tasks: BackgroundTasks,
 ) -> PredictionResponse:
     """
-    Predict fraud probability for a transaction.
+    Predict the anomaly probability for a network flow.
 
-    Returns probability and binary decision at the F2-optimized threshold.
+    Returns the attack probability and binary decision at the recall-calibrated
+    serving threshold.
     """
     bundle = request.app.state.bundle
     if bundle.model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    features = build_feature_vector(transaction, bundle)
-    fraud_proba = float(bundle.model.predict_proba(features)[0, 1])
-    is_fraud = fraud_proba >= bundle.threshold
+    features = build_feature_vector(flow)
+    anomaly_score = float(bundle.model.predict_proba(features)[0, 1])
+    is_anomaly = anomaly_score >= bundle.threshold
 
     if _prom_available:
-        PREDICTION_COUNTER.labels(predicted_class="fraud" if is_fraud else "legit").inc()
+        PREDICTION_COUNTER.labels(predicted_class="anomaly" if is_anomaly else "benign").inc()
 
-    transaction_id = str(uuid.uuid4())[:12]
+    event_id = flow.flow_id or str(uuid.uuid4())[:12]
     timestamp = datetime.utcnow().isoformat()
 
     background_tasks.add_task(
         log_prediction_async,
         {
-            "transaction_id": transaction_id,
-            "fraud_probability": fraud_proba,
-            "is_fraud": is_fraud,
+            "event_id": event_id,
+            "anomaly_score": anomaly_score,
+            "is_anomaly": is_anomaly,
             "threshold": bundle.threshold,
             "model_version": bundle.version,
             "timestamp": timestamp,
-            "features_json": json.dumps({"amt": transaction.amt, "cc_num": transaction.cc_num}),
+            "features_json": json.dumps(
+                {"src_ip": flow.src_ip, "flow_bytes_per_sec": flow.flow_bytes_per_sec}
+            ),
         },
     )
     request.app.state.prediction_count += 1
 
     return PredictionResponse(
-        transaction_id=transaction_id,
-        fraud_probability=round(fraud_proba, 6),
-        is_fraud=is_fraud,
+        event_id=event_id,
+        anomaly_score=round(anomaly_score, 6),
+        is_anomaly=is_anomaly,
         threshold=bundle.threshold,
         model_version=bundle.version,
         timestamp=timestamp,
@@ -184,16 +168,16 @@ async def predict(
 
 @router.post("/predict/explain", response_model=ExplainResponse)
 async def predict_explain(
-    transaction: TransactionRequest,
+    flow: NetworkFlowRequest,
     request: Request,
     background_tasks: BackgroundTasks,
 ) -> ExplainResponse:
     """
-    Predict fraud probability with top-5 SHAP feature contributions.
+    Predict anomaly probability with top-5 SHAP feature contributions.
 
-    SHAP explanations are a regulatory requirement in production fraud
-    detection. This endpoint returns the same prediction as /predict
-    plus the features most responsible for the score.
+    SHAP explanations support analyst triage and audit requirements common in
+    production network security operations. This endpoint returns the same
+    prediction as /predict plus the features most responsible for the score.
     """
     bundle = request.app.state.bundle
     if bundle.model is None:
@@ -203,24 +187,24 @@ async def predict_explain(
     if explainer is None:
         raise HTTPException(status_code=503, detail="SHAP explainer not loaded")
 
-    features = build_feature_vector(transaction, bundle)
-    fraud_proba = float(bundle.model.predict_proba(features)[0, 1])
-    is_fraud = fraud_proba >= bundle.threshold
+    features = build_feature_vector(flow)
+    anomaly_score = float(bundle.model.predict_proba(features)[0, 1])
+    is_anomaly = anomaly_score >= bundle.threshold
 
     top_shap = explainer.top_features(features, bundle.feature_cols, n=5)
 
     if _prom_available:
-        PREDICTION_COUNTER.labels(predicted_class="fraud" if is_fraud else "legit").inc()
+        PREDICTION_COUNTER.labels(predicted_class="anomaly" if is_anomaly else "benign").inc()
 
-    transaction_id = str(uuid.uuid4())[:12]
+    event_id = flow.flow_id or str(uuid.uuid4())[:12]
     timestamp = datetime.utcnow().isoformat()
 
     background_tasks.add_task(
         log_prediction_async,
         {
-            "transaction_id": transaction_id,
-            "fraud_probability": fraud_proba,
-            "is_fraud": is_fraud,
+            "event_id": event_id,
+            "anomaly_score": anomaly_score,
+            "is_anomaly": is_anomaly,
             "threshold": bundle.threshold,
             "model_version": bundle.version,
             "timestamp": timestamp,
@@ -229,9 +213,9 @@ async def predict_explain(
     request.app.state.prediction_count += 1
 
     return ExplainResponse(
-        transaction_id=transaction_id,
-        fraud_probability=round(fraud_proba, 6),
-        is_fraud=is_fraud,
+        event_id=event_id,
+        anomaly_score=round(anomaly_score, 6),
+        is_anomaly=is_anomaly,
         threshold=bundle.threshold,
         model_version=bundle.version,
         timestamp=timestamp,
@@ -258,16 +242,16 @@ async def prediction_stats():
     async with aiosqlite.connect(str(DB_PATH)) as db:
         await db.execute("PRAGMA journal_mode=WAL")
         cursor = await db.execute("""
-            SELECT COUNT(*) as total, SUM(is_fraud) as total_fraud,
-                   AVG(fraud_probability) as avg_score
+            SELECT COUNT(*) as total, SUM(is_anomaly) as total_anomaly,
+                   AVG(anomaly_score) as avg_score
             FROM predictions
         """)
         row = await cursor.fetchone()
         if row and row[0]:
             return {
                 "total_predictions": row[0],
-                "total_fraud": row[1] or 0,
-                "fraud_rate": (row[1] or 0) / row[0],
+                "total_anomaly": row[1] or 0,
+                "anomaly_rate": (row[1] or 0) / row[0],
                 "avg_score": row[2],
             }
         return {"total_predictions": 0}

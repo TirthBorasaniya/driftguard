@@ -1,1 +1,1 @@
-"""Kafka producer: chronological transaction replay with optional drift injection."""
+"""Kafka producer: chronological replay of CICIDS2017 network flow records."""

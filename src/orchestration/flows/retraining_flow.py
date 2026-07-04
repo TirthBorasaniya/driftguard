@@ -13,7 +13,6 @@ from src.config import (
     settings,
 )
 
-
 # ============= Tasks =============
 
 
@@ -60,9 +59,7 @@ def materialize_features_task() -> None:
 @task(name="load-data")
 def load_data_task():
     """Step 4: Load train/test splits from parquet."""
-    import numpy as np
-
-    from src.config import CATEGORICAL_COLS, FEATURE_COLS, TARGET_COL, TEST_FILE
+    from src.config import FEATURE_COLS, TARGET_COL, TEST_FILE
 
     df_train = pd.read_parquet(TRAIN_FILE)
     df_test = pd.read_parquet(TEST_FILE)
@@ -81,7 +78,7 @@ def load_data_task():
 @task(name="train-challenger", retries=1, retry_delay_seconds=60)
 def train_challenger_task(X_train, y_train, X_test, y_test):
     """Step 5: Train a LightGBM challenger model."""
-    from src.training.train import train_lgbm, log_to_mlflow
+    from src.training.train import log_to_mlflow, train_lgbm
     logger = get_run_logger()
 
     model = train_lgbm(X_train, y_train, X_test, y_test)
@@ -92,19 +89,19 @@ def train_challenger_task(X_train, y_train, X_test, y_test):
 
 @task(name="evaluate-challenger")
 def evaluate_challenger_task(model, X_test, y_test):
-    """Steps 6-7: Evaluate challenger and compute F2 threshold."""
-    import numpy as np
-    from src.training.threshold import find_f2_threshold
+    """Steps 6-7: Evaluate challenger (PR-AUC) and calibrate the serving threshold."""
     from src.training.evaluate import evaluate_model
+    from src.training.threshold import calibrate_threshold
+    from src.training.train import SERVING_RECALL_TARGET
 
     y_proba = model.predict_proba(X_test)[:, 1]
-    threshold = find_f2_threshold(y_test, y_proba)
+    threshold = calibrate_threshold(y_test, y_proba, SERVING_RECALL_TARGET)
     metrics = evaluate_model(model, X_test, y_test, threshold)
 
     logger = get_run_logger()
     logger.info(
-        f"Challenger AUC-PR: {metrics['auc_pr']:.4f}, "
-        f"F2: {metrics['f2_score']:.4f}, threshold: {threshold:.4f}"
+        f"Challenger PR-AUC: {metrics['pr_auc']:.4f}, "
+        f"recall: {metrics['recall']:.4f}, threshold: {threshold:.4f}"
     )
     return metrics, threshold
 
@@ -135,7 +132,6 @@ def promote_champion_task(model_version: int, metrics: dict, threshold: float) -
     promote_champion(model_version, metrics, threshold)
 
     # save production artifacts for API hot-reload
-    import joblib
     import mlflow
     import mlflow.lightgbm
 
@@ -160,7 +156,7 @@ def retraining_flow() -> bool:
     Step 3   : Feast feature materialization
     Step 4   : Load training data
     Step 5   : Train LightGBM challenger
-    Step 6   : Evaluate challenger (AUC-PR, F2, threshold)
+    Step 6   : Evaluate challenger (PR-AUC, recall, calibrated threshold)
     Step 7   : Load champion metrics from JSON
     Step 8   : Compare challenger vs champion
     Step 9   : Promote challenger if improvement > threshold

@@ -1,9 +1,7 @@
-"""Kafka consumer: validate, engineer features, infer, log, drift-detect, commit offset."""
+"""Kafka consumer: validate, compute features, infer, log, drift-detect, commit offset."""
 
-import asyncio
 import json
 import sqlite3
-import uuid
 from datetime import datetime
 
 import joblib
@@ -13,9 +11,7 @@ from confluent_kafka import Consumer, KafkaError, Producer
 from pydantic import ValidationError
 
 from src.config import (
-    CATEGORICAL_COLS,
     DB_PATH,
-    ENCODERS_DIR,
     FEATURE_COLS,
     PRODUCTION_MODEL_PATH,
     REFERENCE_FILE,
@@ -23,17 +19,15 @@ from src.config import (
     settings,
 )
 from src.consumer.dlq_handler import send_to_dlq
-from src.consumer.schemas import TransactionEvent
-from src.data.encoders import load_encoders
-from src.features.engineering import engineer_single_event
+from src.consumer.schemas import NetworkFlowEvent
+from src.features.engineering import compute_features
 from src.monitoring.drift_detector import StreamingDriftDetector
-
 
 # ============= Setup =============
 
 
 def load_inference_artifacts():
-    """Load model, threshold, encoders for inference."""
+    """Load model and decision threshold for inference."""
     import json as _json
 
     model = joblib.load(PRODUCTION_MODEL_PATH)
@@ -43,26 +37,24 @@ def load_inference_artifacts():
         with open(THRESHOLD_PATH) as f:
             threshold = float(_json.load(f)["threshold"])
 
-    encoders = load_encoders(CATEGORICAL_COLS, ENCODERS_DIR)
-    return model, threshold, encoders
+    return model, threshold
 
 
-def build_feature_vector(event: dict, encoders: dict) -> np.ndarray:
-    """Convert a validated event dict into a model feature vector."""
-    event = engineer_single_event(event)
+def build_feature_vector(feature_dict: dict) -> np.ndarray:
+    """
+    Convert a computed feature dict into a model feature vector.
 
-    for col in CATEGORICAL_COLS:
-        enc = encoders.get(col)
-        if enc is not None:
-            encoded = enc.transform(pd.Series([str(event.get(col, ""))]))
-            event[col] = int(encoded.iloc[0])
-        else:
-            event[col] = -1
+    Parameters
+    ----------
+    feature_dict : dict
+        Output of compute_features for a single network flow event.
 
-    feature_values = [
-        float(event.get(col, -999) or -999)
-        for col in FEATURE_COLS
-    ]
+    Returns
+    -------
+    features : np.ndarray
+        Shape (1, n_features), ordered by FEATURE_COLS.
+    """
+    feature_values = [float(feature_dict.get(col, 0.0)) for col in FEATURE_COLS]
     return np.array([feature_values])
 
 
@@ -73,12 +65,12 @@ def log_prediction_sync(record: dict) -> None:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(
             """INSERT INTO predictions
-               (transaction_id, fraud_probability, is_fraud, threshold, model_version, timestamp)
+               (event_id, anomaly_score, is_anomaly, threshold, model_version, timestamp)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (
-                record["transaction_id"],
-                record["fraud_probability"],
-                int(record["is_fraud"]),
+                record["event_id"],
+                record["anomaly_score"],
+                int(record["is_anomaly"]),
                 record["threshold"],
                 record["model_version"],
                 record["timestamp"],
@@ -98,11 +90,11 @@ def run_consumer() -> None:
 
     Processing steps per message (in order):
     1. Deserialize JSON
-    2. Validate with TransactionEvent Pydantic model
+    2. Validate with NetworkFlowEvent Pydantic model
     3. On ValidationError: route to DLQ, continue
-    4. Engineer features via engineering.py
-    5. Run model inference, apply F2 threshold
-    6. Log prediction to SQLite
+    4. Compute features via feature engineering (single source of truth)
+    5. Run model inference, apply calibrated threshold
+    6. Log prediction to SQLite (keyed by src_ip entity / event_id)
     7. Feed event into drift detector window buffer
     8. Manually commit offset (enable.auto.commit=False)
     """
@@ -111,7 +103,7 @@ def run_consumer() -> None:
             f"Model not found: {PRODUCTION_MODEL_PATH}. Run training first."
         )
 
-    model, threshold, encoders = load_inference_artifacts()
+    model, threshold = load_inference_artifacts()
 
     reference_df = None
     if REFERENCE_FILE.exists():
@@ -156,7 +148,7 @@ def run_consumer() -> None:
             # step 1-3: deserialize and validate
             try:
                 payload = json.loads(raw.decode("utf-8"))
-                event = TransactionEvent(**payload)
+                event = NetworkFlowEvent(**payload)
             except (json.JSONDecodeError, ValidationError, UnicodeDecodeError) as e:
                 send_to_dlq(raw, str(e), dlq_producer)
                 consumer.commit(asynchronous=False)
@@ -164,23 +156,24 @@ def run_consumer() -> None:
 
             event_dict = event.model_dump()
 
-            # steps 4-5: engineer features and infer
-            features = build_feature_vector(event_dict, encoders)
-            fraud_proba = float(model.predict_proba(features)[0, 1])
-            is_fraud = fraud_proba >= threshold
+            # steps 4-5: compute features and infer
+            feature_dict = compute_features(event_dict)
+            features = build_feature_vector(feature_dict)
+            anomaly_proba = float(model.predict_proba(features)[0, 1])
+            is_anomaly = anomaly_proba >= threshold
 
-            # step 6: log prediction
+            # step 6: log prediction keyed by the event entity (src_ip)
             log_prediction_sync({
-                "transaction_id": str(uuid.uuid4())[:12],
-                "fraud_probability": fraud_proba,
-                "is_fraud": is_fraud,
+                "event_id": event_dict["event_id"],
+                "anomaly_score": anomaly_proba,
+                "is_anomaly": is_anomaly,
                 "threshold": threshold,
                 "model_version": model_version,
                 "timestamp": datetime.utcnow().isoformat(),
             })
 
-            # step 7: feed drift detector
-            drift_detector.add_event(event_dict)
+            # step 7: feed drift detector with raw fields plus engineered features
+            drift_detector.add_event({**event_dict, **feature_dict})
 
             # step 8: commit offset only after full processing
             consumer.commit(asynchronous=False)

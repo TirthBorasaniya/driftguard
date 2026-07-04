@@ -1,57 +1,87 @@
-"""Data preprocessing: load Sparkov CSV, engineer features, encode categoricals, temporal split."""
+"""Data preprocessing: load CICIDS2017, compute features, temporal split, build Feast source."""
 
-import json
-
-import numpy as np
 import pandas as pd
 
 from src.config import (
-    CARD_STATS_FILE,
-    CATEGORICAL_COLS,
-    CATEGORY_STATS_FILE,
-    ENCODERS_DIR,
+    CICIDS_COLUMN_MAP,
+    CICIDS_DATA_DIR,
+    CICIDS_FILES_ORDERED,
+    ENTITY_COL,
     FEATURE_COLS,
-    NUMERIC_COLS,
+    NETWORK_FLOW_STATS_FILE,
     PROCESSED_DIR,
-    REFERENCE_FILE,
     STREAM_FILE,
     TARGET_COL,
     TEST_FILE,
-    TIME_COL,
-    TRAIN_CSV,
     TRAIN_FILE,
 )
-from src.data.encoders import fit_and_save_encoders
-from src.features.engineering import engineer_features
+from src.features.engineering import compute_features_batch
+from src.producer.flow_producer import TIMESTAMP_FORMAT, load_cicids_file
+
+# datetime column used for the point-in-time temporal split and Feast source
+EVENT_TS_COL = "event_timestamp"
 
 
 # ============= Loading =============
 
 
-def load_raw(path=None) -> pd.DataFrame:
+def load_raw() -> pd.DataFrame:
     """
-    Load the Sparkov fraudTrain CSV.
-
-    Parameters
-    ----------
-    path : Path or None
-        Override path. Defaults to TRAIN_CSV.
+    Load and concatenate all available CICIDS2017 capture files.
 
     Returns
     -------
     df : pd.DataFrame
-        Raw dataframe with all Sparkov columns.
+        Combined raw dataframe with renamed columns and label_binary added.
     """
-    path = path or TRAIN_CSV
-    if not path.exists():
+    frame_list = []
+    for file_name in CICIDS_FILES_ORDERED:
+        path = CICIDS_DATA_DIR / file_name
+        if not path.exists():
+            print(f"  Missing (skipped): {path}")
+            continue
+        df = load_cicids_file(str(path), CICIDS_COLUMN_MAP)
+        frame_list.append(df)
+        print(f"  Loaded {len(df):,} flows from {file_name}")
+
+    if not frame_list:
         raise FileNotFoundError(
-            f"Training data not found: {path}\n"
-            "Download from: https://www.kaggle.com/datasets/kartik2112/fraud-detection"
+            f"No CICIDS2017 files found under {CICIDS_DATA_DIR}\n"
+            "Download from: https://www.unb.ca/cic/datasets/ids-2017.html"
         )
-    df = pd.read_csv(path, low_memory=False)
-    print(f"Loaded: {df.shape[0]:,} rows, {df.shape[1]} columns")
-    print(f"Fraud rate: {df[TARGET_COL].mean():.4%}")
+
+    df = pd.concat(frame_list, ignore_index=True)
+    print(f"Loaded total: {len(df):,} rows | attack rate: {df['label_binary'].mean():.4%}")
     return df
+
+
+# ============= Feature Frame =============
+
+
+def build_feature_frame(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute model features and attach target, entity, and event timestamp.
+
+    Parameters
+    ----------
+    raw_df : pd.DataFrame
+        Combined raw CICIDS2017 dataframe with renamed columns.
+
+    Returns
+    -------
+    feature_df : pd.DataFrame
+        FEATURE_COLS plus label_binary, src_ip, and event_timestamp columns.
+    """
+    feature_df = compute_features_batch(raw_df)
+    feature_df[TARGET_COL] = raw_df["label_binary"].astype(int).values
+    feature_df[ENTITY_COL] = raw_df.get("src_ip", "").astype(str).values
+
+    parsed = pd.to_datetime(raw_df.get("timestamp_raw"), format=TIMESTAMP_FORMAT, errors="coerce")
+    if parsed.isna().any():
+        parsed = parsed.fillna(pd.to_datetime(raw_df.get("timestamp_raw"), errors="coerce"))
+    feature_df[EVENT_TS_COL] = parsed.values
+
+    return feature_df
 
 
 # ============= Temporal Split =============
@@ -59,147 +89,98 @@ def load_raw(path=None) -> pd.DataFrame:
 
 def temporal_split(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     """
-    Split dataframe into temporal partitions at fixed percentile boundaries.
+    Split the dataframe into temporal partitions at fixed percentile boundaries.
 
     Boundaries
     ----------
-    train     : rows 0 to P75 (75%)
-    test      : rows P75 to P90 (15%)
-    reference : rows P90 to P95 (5%)  -- Evidently baseline
-    stream    : rows P95 to end (5%)  -- Kafka replay
+    train  : rows 0 to P75 (75%)
+    test   : rows P75 to P90 (15%)
+    stream : rows P90 to end (10%)  -- Kafka replay
+
+    Never random-split time-ordered flow data; chronological order is preserved
+    to avoid leakage across train, test, and the streamed window.
 
     Parameters
     ----------
     df : pd.DataFrame
-        Full preprocessed dataframe, sorted by trans_date_trans_time.
+        Feature dataframe with an event_timestamp column.
 
     Returns
     -------
     splits : dict
         Mapping of split name to dataframe.
     """
-    df = df.sort_values(TIME_COL).reset_index(drop=True)
+    df = df.sort_values(EVENT_TS_COL).reset_index(drop=True)
     n = len(df)
 
     p75 = int(n * 0.75)
     p90 = int(n * 0.90)
-    p95 = int(n * 0.95)
 
     splits = {
         "train": df.iloc[:p75].copy(),
         "test": df.iloc[p75:p90].copy(),
-        "reference": df.iloc[p90:p95].copy(),
-        "stream": df.iloc[p95:].copy(),
+        "stream": df.iloc[p90:].copy(),
     }
 
     for name, split in splits.items():
-        fraud_rate = split[TARGET_COL].mean() if TARGET_COL in split.columns else 0.0
-        print(f"  {name}: {len(split):,} rows (fraud: {fraud_rate:.4%})")
+        attack_rate = split[TARGET_COL].mean() if TARGET_COL in split.columns else 0.0
+        print(f"  {name}: {len(split):,} rows (attack: {attack_rate:.4%})")
 
     return splits
-
-
-# ============= Aggregated Feature Tables for Feast =============
-
-
-def build_card_stats(df_train: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute rolling 7-day transaction statistics per cc_num from training data.
-
-    These serve as the offline feature store for Feast card_stats_7d view.
-
-    Parameters
-    ----------
-    df_train : pd.DataFrame
-        Training split.
-
-    Returns
-    -------
-    stats : pd.DataFrame
-        Aggregated stats with event_timestamp column.
-    """
-    df = df_train.copy()
-    df["trans_ts"] = pd.to_datetime(df[TIME_COL])
-    df = df.sort_values(["cc_num", "trans_ts"])
-
-    agg = df.groupby("cc_num").agg(
-        txn_count_7d=("amt", "count"),
-        amt_mean_7d=("amt", "mean"),
-        amt_max_7d=("amt", "max"),
-    ).reset_index()
-
-    agg["txn_velocity_7d"] = (agg["txn_count_7d"] / 7.0).astype("float32")
-    agg["event_timestamp"] = df.groupby("cc_num")["trans_ts"].max().values
-    agg["created_timestamp"] = pd.Timestamp.now()
-
-    return agg
-
-
-def build_category_stats(df_train: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute fraud statistics per merchant category from training data.
-
-    These serve as the offline feature store for Feast category_fraud_rate view.
-
-    Parameters
-    ----------
-    df_train : pd.DataFrame
-        Training split.
-
-    Returns
-    -------
-    stats : pd.DataFrame
-        Per-category fraud stats with event_timestamp column.
-    """
-    agg = df_train.groupby("category").agg(
-        category_fraud_count=(TARGET_COL, "sum"),
-        category_txn_count=(TARGET_COL, "count"),
-    ).reset_index()
-
-    agg["category_fraud_rate"] = (
-        agg["category_fraud_count"] / agg["category_txn_count"].clip(lower=1)
-    ).astype("float32")
-
-    agg["event_timestamp"] = pd.Timestamp.now()
-    agg["created_timestamp"] = pd.Timestamp.now()
-
-    return agg
 
 
 # ============= Imputation =============
 
 
 def impute_numeric(df: pd.DataFrame) -> pd.DataFrame:
-    """Fill missing numeric values with -999 (LightGBM handles as separate bin)."""
-    for col in NUMERIC_COLS:
+    """Fill missing feature values with 0.0, mirroring compute_features defaults."""
+    df = df.copy()
+    for col in FEATURE_COLS:
         if col in df.columns:
-            df[col] = df[col].fillna(-999).astype("float32")
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0).astype("float32")
         else:
-            df[col] = np.float32(-999)
+            df[col] = pd.Series(0.0, index=df.index, dtype="float32")
     return df
+
+
+# ============= Aggregated Feature Table for Feast =============
+
+
+def build_src_ip_stats(df_train: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute the mean flow feature profile per source IP from training data.
+
+    Backs the Feast network_flow_features offline source, keyed by src_ip.
+
+    Parameters
+    ----------
+    df_train : pd.DataFrame
+        Training split with FEATURE_COLS, src_ip, and event_timestamp columns.
+
+    Returns
+    -------
+    stats : pd.DataFrame
+        One row per src_ip with mean features and an event_timestamp column.
+    """
+    agg = df_train.groupby(ENTITY_COL)[FEATURE_COLS].mean().reset_index()
+    agg[EVENT_TS_COL] = df_train.groupby(ENTITY_COL)[EVENT_TS_COL].max().values
+    agg["created_timestamp"] = pd.Timestamp.now()
+    return agg
 
 
 # ============= Main Pipeline =============
 
 
 def run_preprocessing() -> None:
-    """Execute full preprocessing pipeline and save all splits to data/processed/."""
+    """Execute full preprocessing and save all splits to data/processed/."""
     print("=" * 60)
-    print("Fraud Pipeline: Preprocessing")
+    print("Network Anomaly Pipeline: Preprocessing")
     print("=" * 60)
 
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    ENCODERS_DIR.mkdir(parents=True, exist_ok=True)
 
-    df = load_raw()
-    df = engineer_features(df)
-
-    print("\nFitting encoders...")
-    encoders_dict = fit_and_save_encoders(df, CATEGORICAL_COLS, ENCODERS_DIR)
-
-    for col, enc in encoders_dict.items():
-        df[col] = enc.transform(df[col])
-
+    raw = load_raw()
+    df = build_feature_frame(raw)
     df = impute_numeric(df)
 
     print("\nSplitting temporally...")
@@ -208,18 +189,13 @@ def run_preprocessing() -> None:
     print("\nSaving splits...")
     splits["train"].to_parquet(TRAIN_FILE, index=False)
     splits["test"].to_parquet(TEST_FILE, index=False)
-    splits["reference"].to_parquet(REFERENCE_FILE, index=False)
     splits["stream"].to_parquet(STREAM_FILE, index=False)
-    print(f"  Saved: train, test, reference, stream -> {PROCESSED_DIR}")
+    print(f"  Saved: train, test, stream -> {PROCESSED_DIR}")
 
-    print("\nBuilding Feast aggregation tables...")
-    card_stats = build_card_stats(splits["train"])
-    card_stats.to_parquet(CARD_STATS_FILE, index=False)
-    print(f"  Saved card_stats_7d: {len(card_stats):,} rows")
-
-    cat_stats = build_category_stats(splits["train"])
-    cat_stats.to_parquet(CATEGORY_STATS_FILE, index=False)
-    print(f"  Saved category_fraud_rate: {len(cat_stats):,} rows")
+    print("\nBuilding Feast aggregation table...")
+    stats = build_src_ip_stats(splits["train"])
+    stats.to_parquet(NETWORK_FLOW_STATS_FILE, index=False)
+    print(f"  Saved network_flow_features: {len(stats):,} rows")
 
     print("\n" + "=" * 60)
     print("Preprocessing complete.")

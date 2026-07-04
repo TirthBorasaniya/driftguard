@@ -59,7 +59,7 @@
       "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []}
     },
     {
-      "title": "Fraud vs Legit Predictions",
+      "title": "Anomaly vs Benign Predictions",
       "type": "piechart",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
       "targets": [{"expr": "model_predictions_total", "legendFormat": "{{predicted_class}}", "refId": "A"}],
@@ -74,8 +74,8 @@
     }
   ],
   "schemaVersion": 39,
-  "tags": ["fraud-pipeline", "ml-health"],
+  "tags": ["network-anomaly-pipeline", "ml-health"],
   "time": {"from": "now-1h", "to": "now"},
   "title": "ML Health",
-  "uid": "fraud-ml-health"
+  "uid": "network-ml-health"
 }

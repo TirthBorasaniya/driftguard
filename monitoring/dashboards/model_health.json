@@ -89,12 +89,12 @@
       }
     },
     {
-      "title": "Fraud Detection Rate",
+      "title": "Anomaly Detection Rate",
       "type": "gauge",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 },
       "targets": [
         {
-          "expr": "rate(model_predictions_total{predicted_class=\"fraud\"}[5m]) / rate(model_predictions_total[5m])",
+          "expr": "rate(model_predictions_total{predicted_class=\"anomaly\"}[5m]) / rate(model_predictions_total[5m])",
           "refId": "A"
         }
       ],

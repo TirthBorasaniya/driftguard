@@ -17,7 +17,6 @@ from src.serving.explainer import SHAPExplainer
 from src.serving.model_loader import load_champion
 from src.serving.routes import router
 
-
 # ============= Database Initialisation =============
 
 
@@ -28,9 +27,9 @@ async def init_db() -> None:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS predictions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                transaction_id TEXT NOT NULL,
-                fraud_probability REAL NOT NULL,
-                is_fraud INTEGER NOT NULL,
+                event_id TEXT NOT NULL,
+                anomaly_score REAL NOT NULL,
+                is_anomaly INTEGER NOT NULL,
                 threshold REAL NOT NULL,
                 model_version TEXT NOT NULL,
                 timestamp TEXT NOT NULL,
@@ -125,10 +124,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Real-Time Fraud Detection API",
+    title="Real-Time Network Anomaly Detection API",
     description=(
-        "Kafka-backed fraud detection with LightGBM, F2-optimized threshold, "
-        "SHAP explanations, and self-healing retraining."
+        "Kafka-backed network telemetry anomaly detection with LightGBM, "
+        "recall-calibrated threshold, SHAP explanations, and self-healing retraining."
     ),
     version="2.0.0",
     lifespan=lifespan,

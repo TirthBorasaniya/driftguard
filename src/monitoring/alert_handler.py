@@ -6,7 +6,7 @@ from datetime import datetime
 from src.config import DB_PATH, settings
 
 
-def _log_healing_event(event_type: str, details: str, drift_score: float = None) -> None:
+def _log_healing_event(event_type: str, details: str, drift_score: float | None = None) -> None:
     """Persist a healing event to the database."""
     conn = sqlite3.connect(str(DB_PATH))
     try:

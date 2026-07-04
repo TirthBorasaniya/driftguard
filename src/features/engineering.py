@@ -1,161 +1,98 @@
-"""Single source of truth for all feature transformations applied at training and serving time."""
+"""Single source of truth for network flow feature transformations at training and serving time."""
 
-import numpy as np
 import pandas as pd
 
+# ============= Feature Definitions =============
 
-# ============= Derived Feature Transforms =============
+# canonical model feature list; imported by config, drift_detector, training, and serving
+# so the same ten columns are computed identically across every path
+FEATURE_COLS = [
+    "flow_duration",
+    "flow_bytes_per_sec",
+    "flow_packets_per_sec",
+    "total_fwd_packets",
+    "total_bwd_packets",
+    "packet_length_mean",
+    "packet_length_std",
+    "flow_iat_mean",
+    "fwd_bwd_packet_ratio",  # engineered
+    "syn_flag_count",
+]
+
+# pass-through columns taken directly from the event with no computation
+PASSTHROUGH_COLS = [
+    "flow_duration",
+    "flow_bytes_per_sec",
+    "flow_packets_per_sec",
+    "total_fwd_packets",
+    "total_bwd_packets",
+    "packet_length_mean",
+    "packet_length_std",
+    "flow_iat_mean",
+    "syn_flag_count",
+]
+
+EPSILON = 1e-9  # division guard for ratio features
 
 
-def haversine_km(
-    lat1: np.ndarray,
-    lon1: np.ndarray,
-    lat2: np.ndarray,
-    lon2: np.ndarray,
-) -> np.ndarray:
+# ============= Single Event (serving path) =============
+
+
+def compute_features(event: dict) -> dict[str, float]:
     """
-    Vectorized haversine distance in kilometres between two coordinate pairs.
+    Compute all ten features from a single network flow event dict.
 
-    Parameters
-    ----------
-    lat1, lon1 : np.ndarray
-        Cardholder coordinates in decimal degrees.
-    lat2, lon2 : np.ndarray
-        Merchant coordinates in decimal degrees.
-
-    Returns
-    -------
-    distance : np.ndarray
-        Great-circle distance in kilometres.
-    """
-    R = 6371.0
-    dlat = np.radians(lat2 - lat1)
-    dlon = np.radians(lon2 - lon1)
-    a = (
-        np.sin(dlat / 2) ** 2
-        + np.cos(np.radians(lat1)) * np.cos(np.radians(lat2)) * np.sin(dlon / 2) ** 2
-    )
-    return 2 * R * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
-
-
-def compute_age(
-    dob_series: pd.Series,
-    reference_timestamps: pd.Series,
-) -> pd.Series:
-    """
-    Compute cardholder age in years at transaction time.
-
-    Parameters
-    ----------
-    dob_series : pd.Series
-        Date of birth strings (YYYY-MM-DD format).
-    reference_timestamps : pd.Series
-        Transaction timestamps.
-
-    Returns
-    -------
-    age : pd.Series
-        Age in whole years, dtype float32.
-    """
-    dob = pd.to_datetime(dob_series, errors="coerce")
-    ts = pd.to_datetime(reference_timestamps, errors="coerce")
-    age = (ts - dob).dt.days / 365.25
-    return age.fillna(-999).astype("float32")
-
-
-def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Apply all derived feature transformations.
-
-    Called at both training time (preprocess.py) and serving time (kafka_consumer.py).
-    Any change here applies to both paths, preventing training-serving skew.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Raw transaction dataframe with Sparkov schema columns.
-
-    Returns
-    -------
-    df : pd.DataFrame
-        Dataframe with derived columns added in-place (copy returned).
-    """
-    df = df.copy()
-
-    ts = pd.to_datetime(df["trans_date_trans_time"], errors="coerce")
-
-    df["hour_of_day"] = ts.dt.hour.astype("float32")
-    df["day_of_week"] = ts.dt.dayofweek.astype("float32")
-
-    df["age"] = compute_age(df["dob"], df["trans_date_trans_time"])
-
-    df["distance_km"] = haversine_km(
-        df["lat"].values.astype(float),
-        df["long"].values.astype(float),
-        df["merch_lat"].values.astype(float),
-        df["merch_long"].values.astype(float),
-    ).astype("float32")
-
-    df["amt_log"] = np.log1p(df["amt"].clip(lower=0)).astype("float32")
-
-    return df
-
-
-def engineer_single_event(event: dict) -> dict:
-    """
-    Apply derived feature transforms to a single transaction dict.
-
-    Used in the Kafka consumer for per-event serving-time feature computation.
+    Used by the Kafka consumer and the FastAPI serving layer so that the
+    feature vector built at inference time matches the training feature
+    matrix exactly, preventing training-serving skew.
 
     Parameters
     ----------
     event : dict
-        Single transaction with raw Sparkov fields.
+        Raw network flow event conforming to the NetworkFlowEvent schema.
 
     Returns
     -------
-    event : dict
-        Event dict with derived fields added.
+    feature_dict : dict[str, float]
+        Mapping of feature name to computed float value for all FEATURE_COLS.
     """
-    import math
-    from datetime import datetime
+    # pass-through fields default to 0.0 when absent so an incomplete event
+    # degrades gracefully rather than raising at inference time
+    feature_dict = {col: float(event.get(col, 0.0) or 0.0) for col in PASSTHROUGH_COLS}
 
-    event = dict(event)
+    fwd = float(event.get("total_fwd_packets", 0.0) or 0.0)
+    bwd = float(event.get("total_bwd_packets", 0.0) or 0.0)
+    feature_dict["fwd_bwd_packet_ratio"] = fwd / (bwd + EPSILON)
 
-    try:
-        ts = pd.to_datetime(event["trans_date_trans_time"])
-        event["hour_of_day"] = float(ts.hour)
-        event["day_of_week"] = float(ts.dayofweek)
-    except Exception:
-        event["hour_of_day"] = -999.0
-        event["day_of_week"] = -999.0
+    # return in canonical FEATURE_COLS order
+    return {col: feature_dict[col] for col in FEATURE_COLS}
 
-    try:
-        dob = pd.to_datetime(event["dob"])
-        ts = pd.to_datetime(event["trans_date_trans_time"])
-        event["age"] = float((ts - dob).days / 365.25)
-    except Exception:
-        event["age"] = -999.0
 
-    try:
-        lat1 = float(event["lat"])
-        lon1 = float(event["long"])
-        lat2 = float(event["merch_lat"])
-        lon2 = float(event["merch_long"])
-        R = 6371.0
-        dlat = math.radians(lat2 - lat1)
-        dlon = math.radians(lon2 - lon1)
-        a = (
-            math.sin(dlat / 2) ** 2
-            + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
-        )
-        event["distance_km"] = 2 * R * math.asin(math.sqrt(max(0, min(1, a))))
-    except Exception:
-        event["distance_km"] = -999.0
+# ============= Batch (training path) =============
 
-    try:
-        event["amt_log"] = float(math.log1p(max(0, float(event["amt"]))))
-    except Exception:
-        event["amt_log"] = -999.0
 
-    return event
+def compute_features_batch(event_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute all ten features for a batch DataFrame of network flow events.
+
+    Parameters
+    ----------
+    event_df : pd.DataFrame
+        DataFrame of raw network flow events with NetworkFlowEvent columns.
+
+    Returns
+    -------
+    feature_df : pd.DataFrame
+        DataFrame with FEATURE_COLS columns, indexed identically to event_df.
+    """
+    feature_df = pd.DataFrame(index=event_df.index)
+
+    for col in PASSTHROUGH_COLS:
+        # coerce to float and fill missing with 0.0 to mirror compute_features
+        feature_df[col] = pd.to_numeric(event_df.get(col), errors="coerce").fillna(0.0).astype("float64")
+
+    fwd = pd.to_numeric(event_df.get("total_fwd_packets"), errors="coerce").fillna(0.0)
+    bwd = pd.to_numeric(event_df.get("total_bwd_packets"), errors="coerce").fillna(0.0)
+    feature_df["fwd_bwd_packet_ratio"] = (fwd / (bwd + EPSILON)).astype("float64")
+
+    return feature_df[FEATURE_COLS]

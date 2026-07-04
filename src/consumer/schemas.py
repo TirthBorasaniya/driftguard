@@ -1,29 +1,38 @@
-"""Pydantic schema for incoming Kafka transaction events."""
+"""Pydantic schema for incoming Kafka network flow events."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+# ============= Network Flow Event =============
 
 
-class TransactionEvent(BaseModel):
+class NetworkFlowEvent(BaseModel):
     """
-    Validated Kafka transaction event.
+    Validated Kafka network flow event.
 
-    Any message that fails validation against this model is routed to
-    the dead letter queue topic with the validation error attached as a header.
+    Mirrors the NetworkFlowEvent Avro contract in
+    src/schemas/network_flow_event.avsc. Any message that fails validation
+    against this model is routed to the dead letter queue topic with the
+    validation error attached as a header.
     """
 
-    cc_num: str
-    merchant: str
-    category: str
-    amt: float = Field(gt=0)
-    gender: str
-    city: str
-    state: str
-    zip: str
-    lat: float
-    long: float
-    city_pop: int
-    job: str
-    dob: str
-    merch_lat: float
-    merch_long: float
-    trans_date_trans_time: str
+    event_id: str
+    flow_id: str
+    timestamp_utc: int
+    src_ip: str
+    dst_ip: str
+    src_port: int
+    dst_port: int
+    protocol: int
+    flow_duration: float
+    flow_bytes_per_sec: float
+    flow_packets_per_sec: float
+    total_fwd_packets: float
+    total_bwd_packets: float
+    total_length_fwd_packets: float
+    total_length_bwd_packets: float
+    packet_length_mean: float
+    packet_length_std: float
+    flow_iat_mean: float
+    syn_flag_count: float
+    label: str
+    label_binary: int

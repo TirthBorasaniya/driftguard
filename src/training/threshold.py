@@ -1,35 +1,46 @@
-"""F2 threshold optimization: find decision threshold that maximizes F2 on Precision-Recall curve."""
+"""Serving threshold calibration: select the operating point that meets a recall floor."""
 
 import numpy as np
 from sklearn.metrics import precision_recall_curve
 
 
-def find_f2_threshold(y_true: np.ndarray, y_proba: np.ndarray) -> float:
+def calibrate_threshold(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    recall_target: float,
+) -> float:
     """
-    Find decision threshold that maximizes F2 score on the Precision-Recall curve.
+    Find the classification threshold that achieves the target recall.
 
-    F2 weights recall twice as heavily as precision, which is the correct
-    operating point for fraud detection: missing a fraud (false negative) is
-    more costly than a false alarm (false positive).
+    Recall decreases monotonically as the threshold rises, so any threshold at
+    or below a boundary value satisfies the recall floor. This returns the
+    highest such threshold, which meets the recall floor while maximizing
+    precision (minimizing false alarms). For network anomaly detection a missed
+    attack is more costly than a false alarm, so the recall floor is enforced.
 
     Parameters
     ----------
     y_true : np.ndarray
         Ground truth binary labels.
-    y_proba : np.ndarray
-        Predicted fraud probabilities.
+    y_prob : np.ndarray
+        Predicted probabilities for the positive (attack) class.
+    recall_target : float
+        Minimum recall to achieve at the returned threshold.
 
     Returns
     -------
     threshold : float
-        Optimal decision threshold in [0, 1].
+        Classification threshold calibrated to recall_target.
     """
-    precisions, recalls, thresholds = precision_recall_curve(y_true, y_proba)
+    precisions, recalls, thresholds = precision_recall_curve(y_true, y_prob)
 
-    # F2 = (1 + 2^2) * P * R / (2^2 * P + R) = 5*P*R / (4*P + R)
-    denom = 4 * precisions + recalls + 1e-9
-    f2_scores = (5 * precisions * recalls) / denom
+    # thresholds has len(precisions) - 1 elements; recalls[:-1] aligns with it
+    candidate_list = [
+        float(t) for t, r in zip(thresholds, recalls[:-1]) if r >= recall_target
+    ]
 
-    # thresholds has len(precisions) - 1 elements
-    best_idx = int(np.argmax(f2_scores[:-1]))
-    return float(thresholds[best_idx])
+    if candidate_list:
+        return max(candidate_list)
+
+    # target recall unreachable; fall back to the most permissive threshold
+    return float(thresholds.min()) if len(thresholds) else 0.0

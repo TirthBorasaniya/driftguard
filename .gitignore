@@ -55,3 +55,7 @@ htmlcov/
 # IDE
 .vscode/
 .idea/
+
+# Local-only session specs (not pushed)
+CLAUDE_domain_migration.md
+P1_COMBINED_SESSION.md

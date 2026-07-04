@@ -1,0 +1,72 @@
+{
+  "name": "network_flow_checkpoint",
+  "suite": "network_flow_feature_suite",
+  "expectations": [
+    {
+      "column": "flow_duration",
+      "checks": [
+        "null_rate_max_0.02"
+      ]
+    },
+    {
+      "column": "flow_bytes_per_sec",
+      "checks": [
+        "null_rate_max_0.02"
+      ]
+    },
+    {
+      "column": "flow_packets_per_sec",
+      "checks": [
+        "null_rate_max_0.02"
+      ]
+    },
+    {
+      "column": "total_fwd_packets",
+      "checks": [
+        "null_rate_max_0.02"
+      ]
+    },
+    {
+      "column": "total_bwd_packets",
+      "checks": [
+        "null_rate_max_0.02"
+      ]
+    },
+    {
+      "column": "packet_length_mean",
+      "checks": [
+        "null_rate_max_0.02"
+      ]
+    },
+    {
+      "column": "packet_length_std",
+      "checks": [
+        "null_rate_max_0.02"
+      ]
+    },
+    {
+      "column": "flow_iat_mean",
+      "checks": [
+        "null_rate_max_0.02"
+      ]
+    },
+    {
+      "column": "fwd_bwd_packet_ratio",
+      "checks": [
+        "null_rate_max_0.02"
+      ]
+    },
+    {
+      "column": "syn_flag_count",
+      "checks": [
+        "null_rate_max_0.02"
+      ]
+    },
+    {
+      "table": "row_count",
+      "checks": [
+        "between_10000_5000000"
+      ]
+    }
+  ]
+}

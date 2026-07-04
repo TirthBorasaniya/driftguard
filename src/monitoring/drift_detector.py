@@ -9,23 +9,25 @@ from evidently.metrics import DataDriftTable, DatasetDriftMetric
 from evidently.report import Report
 
 from src.config import (
-    CATEGORICAL_COLS,
     DB_PATH,
-    FEATURE_COLS,
-    NUMERIC_COLS,
+    REFERENCE_FILE,
     REPORTS_DIR,
     settings,
 )
+from src.features.engineering import FEATURE_COLS
+
+# reference distribution for PSI/drift computation (benign-only baseline)
+REFERENCE_DATA_PATH = str(REFERENCE_FILE)
 
 
 # ============= Column Mapping =============
 
 
 def get_column_mapping() -> ColumnMapping:
-    """Build Evidently ColumnMapping for the Sparkov feature set."""
+    """Build Evidently ColumnMapping for the network flow feature set (all numerical)."""
     return ColumnMapping(
-        numerical_features=[c for c in NUMERIC_COLS if c in FEATURE_COLS],
-        categorical_features=[c for c in CATEGORICAL_COLS if c in FEATURE_COLS],
+        numerical_features=list(FEATURE_COLS),
+        categorical_features=[],
     )
 
 
@@ -160,7 +162,7 @@ class StreamingDriftDetector:
         Parameters
         ----------
         event : dict
-            Processed transaction event.
+            Processed network flow event with computed features.
 
         Returns
         -------

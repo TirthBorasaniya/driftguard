@@ -1,51 +1,64 @@
-"""Tests for Great Expectations data validation suite."""
+"""Tests for the bounded Great Expectations style validation suite."""
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from src.validation.expectations import run_validation_suite
+from src.validation.expectations import (
+    MAX_NULL_RATE,
+    MIN_ROW_COUNT,
+    NUMERICAL_FEATURE_COLS,
+    SUITE_NAME,
+    validate_batch,
+)
 
 
-def test_valid_data_passes(sample_df):
-    passed, failures = run_validation_suite(sample_df)
-    assert passed, f"Expected pass but got failures: {failures}"
+@pytest.fixture
+def valid_batch():
+    """A clean batch above MIN_ROW_COUNT with no nulls."""
+    n = MIN_ROW_COUNT + 500
+    np.random.seed(0)
+    return pd.DataFrame({col: np.random.rand(n) for col in NUMERICAL_FEATURE_COLS})
 
 
-def test_null_amt_fails(sample_df):
-    df = sample_df.copy()
-    df.loc[0, "amt"] = None
-    passed, failures = run_validation_suite(df)
-    assert not passed
-    assert any("amt" in f for f in failures)
+def test_suite_name_is_network_flow():
+    assert SUITE_NAME == "network_flow_feature_suite"
 
 
-def test_negative_amt_fails(sample_df):
-    df = sample_df.copy()
-    df.loc[0, "amt"] = -5.0
-    passed, failures = run_validation_suite(df)
-    assert not passed
+def test_numerical_feature_cols_count():
+    assert len(NUMERICAL_FEATURE_COLS) == 10
 
 
-def test_low_category_cardinality_fails(sample_df):
-    df = sample_df.copy()
-    df["category"] = "grocery_pos"  # only 1 unique value
-    passed, failures = run_validation_suite(df)
-    assert not passed
-    assert any("category" in f for f in failures)
+def test_valid_batch_passes(valid_batch):
+    o_passed, failures = validate_batch(valid_batch)
+    assert o_passed, f"expected pass but got: {failures}"
 
 
-def test_fraud_rate_too_high_fails(sample_df):
-    df = sample_df.copy()
-    df["is_fraud"] = 1  # 100% fraud rate
-    passed, failures = run_validation_suite(df)
-    assert not passed
-    assert any("is_fraud" in f for f in failures)
+def test_null_rate_above_two_percent_fails(valid_batch):
+    df = valid_batch.copy()
+    n = len(df)
+    # set 5% of one feature column to null (above MAX_NULL_RATE of 2%)
+    df.loc[df.index[: int(n * 0.05)], "flow_duration"] = np.nan
+    o_passed, failures = validate_batch(df)
+    assert not o_passed
+    assert any("flow_duration" in f for f in failures)
 
 
-def test_duplicate_trans_num_fails(sample_df):
-    df = sample_df.copy()
-    df["trans_num"] = "dup_txn_000"
-    passed, failures = run_validation_suite(df)
-    assert not passed
-    assert any("trans_num" in f for f in failures)
+def test_null_rate_below_two_percent_passes(valid_batch):
+    df = valid_batch.copy()
+    n = len(df)
+    # 1% nulls is within the 2% allowance
+    df.loc[df.index[: int(n * 0.01)], "syn_flag_count"] = np.nan
+    o_passed, _ = validate_batch(df)
+    assert o_passed
+
+
+def test_row_count_below_minimum_fails():
+    df = pd.DataFrame({col: [0.0] * 100 for col in NUMERICAL_FEATURE_COLS})
+    o_passed, failures = validate_batch(df)
+    assert not o_passed
+    assert any("row_count" in f for f in failures)
+
+
+def test_max_null_rate_constant():
+    assert MAX_NULL_RATE == pytest.approx(0.02)

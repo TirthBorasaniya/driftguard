@@ -33,7 +33,7 @@ class ModelBundle:
 
 def load_champion() -> ModelBundle:
     """
-    Load the champion model, F2 threshold, and encoders.
+    Load the champion model, recall-calibrated threshold, and encoders.
 
     Primary path: MLflow model registry via @champion alias.
     Fallback path: local production_model.pkl if MLflow registry is unavailable.

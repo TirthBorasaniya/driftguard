@@ -4,6 +4,7 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
+from src.features.engineering import FEATURE_COLS
 
 # ============= Environment Settings =============
 
@@ -13,9 +14,9 @@ class Settings(BaseSettings):
 
     # Kafka
     kafka_bootstrap_servers: str = "localhost:9092"
-    kafka_topic: str = "transactions"
-    kafka_dlq_topic: str = "transactions.dlq"
-    kafka_group_id: str = "fraud-consumer"
+    kafka_topic: str = "network_flows"
+    kafka_dlq_topic: str = "network_flows.dlq"
+    kafka_group_id: str = "network-flow-consumer"
 
     # Redis
     redis_host: str = "localhost"
@@ -23,14 +24,16 @@ class Settings(BaseSettings):
 
     # MLflow
     mlflow_tracking_uri: str = "sqlite:///mlruns/mlflow.db"
-    mlflow_experiment_name: str = "fraud-detection"
-    mlflow_model_name: str = "fraud-detector"
+    mlflow_experiment_name: str = "network_anomaly_detection"
+    mlflow_model_name: str = "network-anomaly-detector"
     mlflow_champion_alias: str = "champion"
     mlflow_challenger_alias: str = "challenger"
 
     # Model
-    scale_pos_weight: float = 172.0
-    champion_improvement_threshold: float = 0.01
+    # tune to the observed benign/attack class ratio of the loaded CICIDS2017 window
+    scale_pos_weight: float = 10.0
+    # challenger must exceed champion PR-AUC by this margin to be promoted
+    champion_improvement_threshold: float = 0.005
 
     # Drift detection
     drift_min_window: int = 500
@@ -56,26 +59,33 @@ settings = Settings()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
+CICIDS_DATA_DIR = RAW_DIR / "cicids2017"
 PROCESSED_DIR = DATA_DIR / "processed"
+REFERENCE_DIR = DATA_DIR / "reference"
 ENCODERS_DIR = DATA_DIR / "encoders"
-DRIFT_SCENARIOS_DIR = DATA_DIR / "drift_scenarios"
 MODELS_DIR = PROJECT_ROOT / "models"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 FEATURE_REPO_DIR = PROJECT_ROOT / "src" / "features" / "feature_repo"
 
-# raw data files
-TRAIN_CSV = RAW_DIR / "fraudTrain.csv"
-TEST_CSV = RAW_DIR / "fraudTest.csv"
+# raw CICIDS2017 capture files in chronological (replay) order
+CICIDS_FILES_ORDERED = [
+    "Monday-WorkingHours.pcap_ISCX.csv",
+    "Tuesday-WorkingHours.pcap_ISCX.csv",
+    "Wednesday-workingHours.pcap_ISCX.csv",
+    "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv",
+    "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv",
+]
+# Monday is the benign-only capture day used as the clean drift baseline
+REFERENCE_CAPTURE_FILE = CICIDS_DATA_DIR / "Monday-WorkingHours.pcap_ISCX.csv"
 
 # processed splits
 TRAIN_FILE = PROCESSED_DIR / "train.parquet"
 TEST_FILE = PROCESSED_DIR / "test.parquet"
-REFERENCE_FILE = PROCESSED_DIR / "reference.parquet"
+REFERENCE_FILE = REFERENCE_DIR / "reference_network_flows.parquet"
 STREAM_FILE = PROCESSED_DIR / "stream.parquet"
 
-# aggregated feature tables for Feast
-CARD_STATS_FILE = PROCESSED_DIR / "card_stats_7d.parquet"
-CATEGORY_STATS_FILE = PROCESSED_DIR / "category_fraud_rate.parquet"
+# per-entity aggregated feature table backing the Feast offline source
+NETWORK_FLOW_STATS_FILE = PROCESSED_DIR / "network_flow_features.parquet"
 
 # model artifacts
 PRODUCTION_MODEL_PATH = MODELS_DIR / "production_model.pkl"
@@ -87,37 +97,47 @@ FEATURE_COLS_PATH = MODELS_DIR / "feature_cols.json"
 DB_PATH = PROJECT_ROOT / "predictions.db"
 
 
+# ============= CICIDS2017 Field Mapping =============
+
+# maps raw CICIDS2017 CSV column headers to NetworkFlowEvent schema field names;
+# shared by the producer, preprocessing, and the reference dataset generator
+CICIDS_COLUMN_MAP = {
+    "Flow Duration": "flow_duration",
+    "Flow Bytes/s": "flow_bytes_per_sec",
+    "Flow Packets/s": "flow_packets_per_sec",
+    "Total Fwd Packets": "total_fwd_packets",
+    "Total Backward Packets": "total_bwd_packets",
+    "Total Length of Fwd Packets": "total_length_fwd_packets",
+    "Total Length of Bwd Packets": "total_length_bwd_packets",
+    "Packet Length Mean": "packet_length_mean",
+    "Packet Length Std": "packet_length_std",
+    "Flow IAT Mean": "flow_iat_mean",
+    "SYN Flag Count": "syn_flag_count",
+    "Label": "label",
+    "Source IP": "src_ip",
+    "Destination IP": "dst_ip",
+    "Source Port": "src_port",
+    "Destination Port": "dst_port",
+    "Protocol": "protocol",
+    "Flow ID": "flow_id",
+    "Timestamp": "timestamp_raw",
+}
+
+# only BENIGN maps to 0; every other label is an attack and maps to 1
+BENIGN_LABEL = "BENIGN"
+
+
 # ============= Feature Definitions =============
 
-TARGET_COL = "is_fraud"
-ENTITY_COL = "cc_num"
-TIME_COL = "trans_date_trans_time"
+TARGET_COL = "label_binary"
+ENTITY_COL = "src_ip"
+TIME_COL = "timestamp_utc"
 
-# categorical columns — encoded with SafeLabelEncoder, cat_indices passed to LightGBM
-CATEGORICAL_COLS = ["merchant", "category", "gender", "city", "state", "zip", "job"]
+# network flow features are all numeric; there are no categorical model inputs
+CATEGORICAL_COLS: list[str] = []
 
-# numeric columns — raw + derived
-NUMERIC_COLS = [
-    "amt",
-    "lat",
-    "long",
-    "city_pop",
-    "merch_lat",
-    "merch_long",
-    "hour_of_day",
-    "day_of_week",
-    "age",
-    "distance_km",
-    "amt_log",
-    # feast rolling features
-    "txn_count_7d",
-    "amt_mean_7d",
-    "amt_max_7d",
-    "txn_velocity_7d",
-    "category_fraud_rate",
-]
-
-FEATURE_COLS = NUMERIC_COLS + CATEGORICAL_COLS
+# numeric columns equal the canonical FEATURE_COLS for the network anomaly model
+NUMERIC_COLS = list(FEATURE_COLS)
 
 
 # ============= LightGBM Hyperparameters =============

@@ -1,4 +1,4 @@
-project: fraud_pipeline
+project: network_anomaly_pipeline
 provider: local
 registry: ../../../data/feast_registry.db
 online_store:

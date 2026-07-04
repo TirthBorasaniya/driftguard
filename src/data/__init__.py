@@ -1,1 +1,1 @@
-"""Data loading, feature engineering, encoding, and temporal splitting for Sparkov fraud dataset."""
+"""Data loading, feature computation, and temporal splitting for the CICIDS2017 network flow dataset."""

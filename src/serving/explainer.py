@@ -8,7 +8,7 @@ class SHAPExplainer:
     Wraps shap.TreeExplainer for per-prediction feature attribution.
 
     Used by the /predict/explain endpoint to satisfy explainability
-    requirements common in production fraud detection deployments.
+    requirements common in production network security operations.
     """
 
     def __init__(self, model) -> None:
@@ -49,7 +49,7 @@ class SHAPExplainer:
             values = shap_values[0]
 
         n_features = min(len(feature_names), len(values))
-        contributions = [
+        contributions: list[dict] = [
             {"feature": feature_names[i], "shap_value": float(values[i])}
             for i in range(n_features)
         ]

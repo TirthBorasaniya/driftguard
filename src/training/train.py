@@ -19,7 +19,6 @@ from src.config import (
     LGBM_PARAMS,
     LOG_EVALUATION_PERIOD,
     MODELS_DIR,
-    NUMERIC_COLS,
     PRODUCTION_MODEL_PATH,
     TARGET_COL,
     TEST_FILE,
@@ -28,7 +27,17 @@ from src.config import (
     settings,
 )
 from src.training.evaluate import evaluate_model
-from src.training.threshold import find_f2_threshold
+from src.training.threshold import calibrate_threshold
+
+# ============= Operating Point Constants =============
+
+# PR-AUC replaces F2 as the primary metric: it summarizes performance across all
+# thresholds and is the standard metric for imbalanced anomaly detection
+PROMOTION_METRIC = "pr_auc"
+# challenger must exceed champion PR-AUC by this margin to be promoted
+PROMOTION_PRAUC_MARGIN = settings.champion_improvement_threshold
+# serving threshold is calibrated to achieve this recall on the validation split
+SERVING_RECALL_TARGET = 0.95
 
 
 # ============= Data Loading =============
@@ -52,8 +61,8 @@ def load_train_test() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     X_test = df_test[available].values
     y_test = df_test[TARGET_COL].values
 
-    print(f"Train: {X_train.shape}, fraud rate: {y_train.mean():.4%}")
-    print(f"Test:  {X_test.shape}, fraud rate: {y_test.mean():.4%}")
+    print(f"Train: {X_train.shape}, attack rate: {y_train.mean():.4%}")
+    print(f"Test:  {X_test.shape}, attack rate: {y_test.mean():.4%}")
     print(f"Features: {len(available)}")
 
     return X_train, y_train, X_test, y_test
@@ -86,7 +95,6 @@ def train_lgbm(
     -------
     model : lgb.LGBMClassifier
     """
-    available = [c for c in FEATURE_COLS if True]  # preserve order
     cat_indices = [
         i for i, col in enumerate(FEATURE_COLS)
         if col in CATEGORICAL_COLS and i < X_train.shape[1]
@@ -146,12 +154,12 @@ def should_promote(new_metrics: dict, champion_metrics: dict | None) -> bool:
         return True
 
     improvement = new_metrics["auc_pr"] - champion_metrics.get("auc_pr", 0)
-    threshold = settings.champion_improvement_threshold
-    result = improvement > threshold
+    margin = PROMOTION_PRAUC_MARGIN
+    result = improvement > margin
     print(
-        f"AUC-PR: challenger={new_metrics['auc_pr']:.4f}, "
+        f"PR-AUC: challenger={new_metrics['auc_pr']:.4f}, "
         f"champion={champion_metrics.get('auc_pr', 0):.4f}, "
-        f"improvement={improvement:+.4f} (threshold={threshold})"
+        f"improvement={improvement:+.4f} (margin={margin})"
     )
     return result
 
@@ -258,7 +266,7 @@ def run_training() -> tuple:
     threshold : float
     """
     print("=" * 60)
-    print("Fraud Pipeline: Model Training")
+    print("Network Anomaly Pipeline: Model Training")
     print("=" * 60)
 
     start = time.time()
@@ -267,13 +275,12 @@ def run_training() -> tuple:
     model = train_lgbm(X_train, y_train, X_test, y_test)
 
     y_proba = model.predict_proba(X_test)[:, 1]
-    threshold = find_f2_threshold(y_test, y_proba)
-    print(f"F2-optimized threshold: {threshold:.4f}")
+    threshold = calibrate_threshold(y_test, y_proba, SERVING_RECALL_TARGET)
+    print(f"Recall-calibrated threshold (target={SERVING_RECALL_TARGET}): {threshold:.4f}")
 
     metrics = evaluate_model(model, X_test, y_test, threshold)
-    print(f"AUC-PR: {metrics['auc_pr']:.4f}")
-    print(f"AUC-ROC: {metrics['auc_roc']:.4f}")
-    print(f"F2: {metrics['f2_score']:.4f}")
+    print(f"PR-AUC: {metrics['pr_auc']:.4f}")
+    print(f"ROC-AUC: {metrics['auc_roc']:.4f}")
     print(f"Precision: {metrics['precision']:.4f}")
     print(f"Recall: {metrics['recall']:.4f}")
 

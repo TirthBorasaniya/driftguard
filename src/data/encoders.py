@@ -3,7 +3,6 @@
 import pickle
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 
@@ -12,7 +11,7 @@ class SafeLabelEncoder:
     Label encoder that maps unseen categories to -1 rather than raising ValueError.
 
     sklearn LabelEncoder raises ValueError on unseen values and will crash the
-    serving API when new merchants or states appear in production. This encoder
+    serving API when new categorical values appear in production. This encoder
     maps them to a reserved bin (-1) which LightGBM treats as a separate category.
     """
 

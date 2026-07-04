@@ -1,12 +1,19 @@
-"""Tests for FastAPI serving layer endpoints."""
+"""Tests for the FastAPI serving layer (skipped when serving dependencies are unavailable)."""
 
 import pytest
-from fastapi.testclient import TestClient
 
 
 @pytest.fixture
 def client():
+    # serving imports the full inference stack; skip cleanly if any dep is absent
+    pytest.importorskip("fastapi")
+    pytest.importorskip("mlflow")
+    pytest.importorskip("aiosqlite")
+    pytest.importorskip("prometheus_fastapi_instrumentator")
+    from fastapi.testclient import TestClient
+
     from src.serving.main import app
+
     return TestClient(app)
 
 
@@ -17,10 +24,7 @@ def test_health_returns_200(client):
 
 def test_health_has_required_fields(client):
     data = client.get("/health").json()
-    assert "status" in data
-    assert "model_loaded" in data
-    assert "model_version" in data
-    assert "uptime_seconds" in data
+    assert {"status", "model_loaded", "model_version", "uptime_seconds"} <= set(data)
 
 
 def test_predict_missing_fields_returns_422(client):
@@ -28,19 +32,18 @@ def test_predict_missing_fields_returns_422(client):
     assert resp.status_code == 422
 
 
-def test_predict_valid_returns_200_or_503(client, sample_transaction_request):
-    resp = client.post("/predict", json=sample_transaction_request)
+def test_predict_valid_returns_200_or_503(client, sample_flow_request):
+    resp = client.post("/predict", json=sample_flow_request)
     assert resp.status_code in (200, 503)
     if resp.status_code == 200:
         data = resp.json()
-        assert "fraud_probability" in data
-        assert "is_fraud" in data
-        assert "threshold" in data
-        assert 0 <= data["fraud_probability"] <= 1
+        assert {"event_id", "anomaly_score", "is_anomaly", "threshold"} <= set(data)
+        assert 0.0 <= data["anomaly_score"] <= 1.0
+        assert isinstance(data["is_anomaly"], bool)
 
 
-def test_predict_explain_valid(client, sample_transaction_request):
-    resp = client.post("/predict/explain", json=sample_transaction_request)
+def test_predict_explain_valid(client, sample_flow_request):
+    resp = client.post("/predict/explain", json=sample_flow_request)
     assert resp.status_code in (200, 503)
     if resp.status_code == 200:
         data = resp.json()
@@ -58,9 +61,3 @@ def test_prediction_stats_returns_dict(client):
     resp = client.get("/predictions/stats")
     assert resp.status_code == 200
     assert isinstance(resp.json(), dict)
-
-
-def test_predict_negative_amt_returns_422(client, sample_transaction_request):
-    payload = {**sample_transaction_request, "amt": -10.0}
-    resp = client.post("/predict", json=payload)
-    assert resp.status_code == 422

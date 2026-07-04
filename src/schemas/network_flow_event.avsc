@@ -1,0 +1,28 @@
+{
+  "type": "record",
+  "name": "NetworkFlowEvent",
+  "namespace": "com.p1.pipeline",
+  "fields": [
+    {"name": "event_id",                  "type": "string"},
+    {"name": "flow_id",                   "type": "string"},
+    {"name": "timestamp_utc",             "type": "long",   "logicalType": "timestamp-millis"},
+    {"name": "src_ip",                    "type": "string"},
+    {"name": "dst_ip",                    "type": "string"},
+    {"name": "src_port",                  "type": "int"},
+    {"name": "dst_port",                  "type": "int"},
+    {"name": "protocol",                  "type": "int"},
+    {"name": "flow_duration",             "type": "double"},
+    {"name": "flow_bytes_per_sec",        "type": "double"},
+    {"name": "flow_packets_per_sec",      "type": "double"},
+    {"name": "total_fwd_packets",         "type": "double"},
+    {"name": "total_bwd_packets",         "type": "double"},
+    {"name": "total_length_fwd_packets",  "type": "double"},
+    {"name": "total_length_bwd_packets",  "type": "double"},
+    {"name": "packet_length_mean",        "type": "double"},
+    {"name": "packet_length_std",         "type": "double"},
+    {"name": "flow_iat_mean",             "type": "double"},
+    {"name": "syn_flag_count",            "type": "double"},
+    {"name": "label",                     "type": "string"},
+    {"name": "label_binary",              "type": "int"}
+  ]
+}

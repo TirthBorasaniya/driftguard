@@ -1,52 +1,9 @@
-"""Tests for data preprocessing, feature engineering, and encoding."""
+"""Tests for the retained SafeLabelEncoder utility."""
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from src.data.encoders import SafeLabelEncoder
-from src.features.engineering import engineer_features, haversine_km
-
-
-def test_haversine_zero_distance():
-    dist = haversine_km(
-        np.array([40.0]), np.array([-74.0]),
-        np.array([40.0]), np.array([-74.0]),
-    )
-    assert dist[0] == pytest.approx(0.0, abs=1e-6)
-
-
-def test_haversine_known_distance():
-    # NYC to London approximately 5570 km
-    dist = haversine_km(
-        np.array([40.7128]), np.array([-74.0060]),
-        np.array([51.5074]), np.array([-0.1278]),
-    )
-    assert 5400 < dist[0] < 5800
-
-
-def test_engineer_features_creates_columns(sample_df):
-    df = engineer_features(sample_df)
-    assert "hour_of_day" in df.columns
-    assert "day_of_week" in df.columns
-    assert "age" in df.columns
-    assert "distance_km" in df.columns
-    assert "amt_log" in df.columns
-
-
-def test_engineer_features_amt_log_nonneg(sample_df):
-    df = engineer_features(sample_df)
-    assert (df["amt_log"] >= 0).all()
-
-
-def test_engineer_features_hour_range(sample_df):
-    df = engineer_features(sample_df)
-    assert df["hour_of_day"].between(0, 23).all()
-
-
-def test_engineer_features_dow_range(sample_df):
-    df = engineer_features(sample_df)
-    assert df["day_of_week"].between(0, 6).all()
 
 
 class TestSafeLabelEncoder:

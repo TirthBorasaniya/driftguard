@@ -1,35 +1,30 @@
-"""Pydantic request and response models for the fraud detection API."""
+"""Pydantic request and response models for the network anomaly detection API."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
-class TransactionRequest(BaseModel):
-    """Raw transaction fields as received from the client or Kafka consumer."""
+class NetworkFlowRequest(BaseModel):
+    """Raw network flow features as received from the client or Kafka consumer."""
 
-    cc_num: str
-    merchant: str
-    category: str
-    amt: float = Field(gt=0)
-    gender: str
-    city: str
-    state: str
-    zip: str
-    lat: float
-    long: float
-    city_pop: int
-    job: str
-    dob: str
-    merch_lat: float
-    merch_long: float
-    trans_date_trans_time: str
+    flow_duration: float
+    flow_bytes_per_sec: float
+    flow_packets_per_sec: float
+    total_fwd_packets: float
+    total_bwd_packets: float
+    packet_length_mean: float
+    packet_length_std: float
+    flow_iat_mean: float
+    syn_flag_count: float
+    src_ip: str | None = None
+    flow_id: str | None = None
 
 
 class PredictionResponse(BaseModel):
-    """Standard fraud prediction response."""
+    """Standard network anomaly prediction response."""
 
-    transaction_id: str
-    fraud_probability: float
-    is_fraud: bool
+    event_id: str
+    anomaly_score: float
+    is_anomaly: bool
     threshold: float
     model_version: str
     timestamp: str
@@ -43,7 +38,7 @@ class FeatureContribution(BaseModel):
 
 
 class ExplainResponse(PredictionResponse):
-    """Fraud prediction with top-5 SHAP feature contributions."""
+    """Network anomaly prediction with top-5 SHAP feature contributions."""
 
     top_features: list[FeatureContribution]
 
