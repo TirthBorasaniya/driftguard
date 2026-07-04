@@ -4,31 +4,37 @@ from confluent_kafka import Producer
 
 from src.config import settings
 
+DLQ_TOPIC = settings.kafka_dlq_topic
+DLQ_ERROR_HEADER_KEY = "validation_error"
 
-def send_to_dlq(
-    raw_message_value: bytes,
-    error: str,
+
+def route_to_dlq(
     producer: Producer,
+    raw_message: bytes,
+    validation_error: str,
+    dlq_topic: str = DLQ_TOPIC,
 ) -> None:
     """
-    Publish a malformed message to the dead letter queue topic.
+    Publish a malformed message to the dead letter queue with the validation
+    error attached as a header.
 
-    The original message bytes are forwarded unchanged. The validation error
-    is attached as a Kafka header so downstream consumers can inspect it.
-    Never silently drops malformed events.
+    The original message bytes are forwarded unchanged. Never silently drops
+    malformed events.
 
     Parameters
     ----------
-    raw_message_value : bytes
-        Original undecoded message payload.
-    error : str
-        Validation or deserialization error description.
     producer : Producer
-        Confluent Kafka producer instance.
+        Initialized Confluent Kafka producer.
+    raw_message : bytes
+        The original malformed message payload.
+    validation_error : str
+        Description of why validation failed.
+    dlq_topic : str
+        Destination DLQ topic name.
     """
     producer.produce(
-        topic=settings.kafka_dlq_topic,
-        value=raw_message_value,
-        headers={"error": error.encode("utf-8")},
+        topic=dlq_topic,
+        value=raw_message,
+        headers={DLQ_ERROR_HEADER_KEY: validation_error.encode("utf-8")},
     )
     producer.poll(0)

@@ -18,7 +18,7 @@ from src.config import (
     THRESHOLD_PATH,
     settings,
 )
-from src.consumer.dlq_handler import send_to_dlq
+from src.consumer.dlq_handler import route_to_dlq
 from src.consumer.schemas import NetworkFlowEvent
 from src.features.engineering import compute_features
 from src.monitoring.drift_detector import StreamingDriftDetector
@@ -150,7 +150,7 @@ def run_consumer() -> None:
                 payload = json.loads(raw.decode("utf-8"))
                 event = NetworkFlowEvent(**payload)
             except (json.JSONDecodeError, ValidationError, UnicodeDecodeError) as e:
-                send_to_dlq(raw, str(e), dlq_producer)
+                route_to_dlq(dlq_producer, raw, str(e))
                 consumer.commit(asynchronous=False)
                 continue
 

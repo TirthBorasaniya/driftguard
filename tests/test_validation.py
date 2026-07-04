@@ -5,10 +5,12 @@ import pandas as pd
 import pytest
 
 from src.validation.expectations import (
+    FEATURE_BOUNDS,
     MAX_NULL_RATE,
     MIN_ROW_COUNT,
     NUMERICAL_FEATURE_COLS,
     SUITE_NAME,
+    add_bounded_expectations,
     validate_batch,
 )
 
@@ -62,3 +64,18 @@ def test_row_count_below_minimum_fails():
 
 def test_max_null_rate_constant():
     assert MAX_NULL_RATE == pytest.approx(0.02)
+
+
+def test_negative_value_in_bounded_column_fails(valid_batch):
+    df = valid_batch.copy()
+    df.loc[df.index[0], "flow_bytes_per_sec"] = -1.0
+    o_passed, failures = validate_batch(df)
+    assert not o_passed
+    assert any("flow_bytes_per_sec" in f for f in failures)
+
+
+def test_add_bounded_expectations_extends_suite():
+    suite = {"name": "test_suite", "expectations": []}
+    result = add_bounded_expectations(suite, FEATURE_BOUNDS)
+    columns_with_bounds = {e["column"] for e in result["expectations"]}
+    assert columns_with_bounds == set(FEATURE_BOUNDS.keys())

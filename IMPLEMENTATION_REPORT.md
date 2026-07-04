@@ -229,3 +229,83 @@ than restructuring the repo. Specific decisions:
 - End-to-end run on real CICIDS2017 data (download -> preprocess -> train -> serve ->
   stream -> dashboards) was not performed: the raw dataset is not present in this
   environment and the heavy runtime dependencies are not installed.
+
+---
+
+# Infra Improvements (P1_COMBINED_SESSION.md, Phases 2-4)
+
+Each section documents the audit finding, what was implemented, and any deviation from
+the spec with justification. Sections are added as each improvement is completed.
+
+## 1. Dead Letter Queue Hardening (Tier 1)
+- Audit finding: PARTIAL. `send_to_dlq` existed and published to `network_flows.dlq`
+  with a header, but the header key was `"error"`, not the spec's `"validation_error"`,
+  and there was no `DLQ_ERROR_HEADER_KEY` constant.
+- Implemented: `src/consumer/dlq_handler.py` renamed `send_to_dlq` -> `route_to_dlq`
+  matching the spec signature `(producer, raw_message, validation_error, dlq_topic)`;
+  added `DLQ_TOPIC` and `DLQ_ERROR_HEADER_KEY = "validation_error"` constants; the
+  header now uses `DLQ_ERROR_HEADER_KEY`. Updated the one call site in
+  `src/consumer/flow_consumer.py`.
+- Tests: `tests/test_dlq.py` — asserts a routed message lands on `DLQ_TOPIC` with the
+  `validation_error` header set to the encoded error string. Skipped locally via
+  `pytest.importorskip("confluent_kafka")` since the native client is not installed in
+  this environment; runs on CI.
+- Deviation: none.
+
+## 2. PSI Drift Detection (Tier 1)
+- Audit finding: PARTIAL. `alert_handler.py` already triggered `retraining_flow()` on
+  drift (not just logging), but the gate was Evidently's `drift_share`/
+  `DatasetDriftMetric`, a different signal than PSI. No PSI-specific constants or
+  trigger function existed.
+- Implemented: `src/monitoring/drift_detector.py` adds `PSI_MINOR_THRESHOLD = 0.1`,
+  `PSI_SIGNIFICANT_THRESHOLD = 0.25`, `DRIFT_MIN_WINDOW = 500`, a `compute_psi_scores`
+  function using Evidently's `ColumnDriftMetric(stattest="psi")` per feature column, and
+  `check_drift_and_trigger_retraining(psi_score, significant_threshold,
+  retraining_flow_fn)` exactly matching the spec signature. `StreamingDriftDetector.
+  add_event` now runs the PSI computation on every window (after the existing
+  `drift_share` check finds no dataset-level drift) and calls
+  `check_drift_and_trigger_retraining` against the Prefect `retraining_flow`, so the two
+  signals coexist rather than one replacing the other, per the user's correction.
+- Tests: `tests/test_psi_trigger.py` — asserts the flow function is called when
+  `psi_score` exceeds `PSI_SIGNIFICANT_THRESHOLD` and is not called below
+  `PSI_MINOR_THRESHOLD`. Skipped locally via `pytest.importorskip("evidently")`; runs on
+  CI.
+- Deviation: the existing `drift_share` gate was left in place per the user's explicit
+  instruction not to rename or remove it; the PSI path is a genuinely separate signal
+  computed via Evidently's per-column PSI stattest, not a relabeling of `drift_share`.
+
+## 3. Latency SLOs (Tier 1)
+- Audit finding: MISSING. No alert rule file, no `rule_files` wiring in
+  `monitoring/prometheus.yml`, no SLO panel in `infra.json`.
+- Implemented: created `monitoring/prometheus/alerts.yml` with the
+  `PredictLatencyP95Breach` (>150ms, warning) and `PredictLatencyP99Breach` (>300ms,
+  critical) rules from the spec. Wired `rule_files: ["prometheus/alerts.yml"]` into
+  `monitoring/prometheus.yml`, and mounted `./monitoring/prometheus` into the Prometheus
+  container in `docker-compose.yml` so the relative rule path resolves. Added an
+  "/predict Latency SLO Burn" panel to `infra.json` showing p95/p99 against the 150ms/
+  300ms thresholds via Grafana threshold steps.
+- Tests: `tests/test_latency_slo.py` — asserts `alerts.yml` parses as valid YAML,
+  contains the `latency_slo` group with both alert names, and each rule's `expr`
+  references `http_request_duration_seconds_bucket` and `handler="/predict"`.
+- Deviation: fixed a YAML structural bug in the spec's own example (the
+  `PredictLatencyP99Breach` rule had `summary` nested under `labels` instead of
+  `annotations`) since a literal copy would not parse correctly.
+
+## 4. Bounded Great Expectations Rules (Tier 1)
+- Audit finding: MISSING. `expectations.py` only checked null rate and row count.
+- Implemented: `src/validation/expectations.py` adds the `FEATURE_BOUNDS` dict (all ten
+  features bounded at `(0.0, None)` per the spec), a `_check_bounds` helper, and
+  `add_bounded_expectations(ge_suite, feature_bounds_dict)` matching the spec signature.
+  Since this repo's validation suite is a hand-rolled dict/list config (no real GE
+  `ExpectationSuite` object — noted in the Phase 1 report), `ge_suite` is the same
+  checkpoint dict structure used by `save_checkpoint_config`. `validate_batch` now runs
+  bound checks on every `FEATURE_BOUNDS` column in addition to null-rate and row-count,
+  and `save_checkpoint_config` calls `add_bounded_expectations` so the persisted
+  checkpoint documents the bounds.
+- Tests: `tests/test_validation.py` — `test_negative_value_in_bounded_column_fails`
+  asserts a synthetic batch with a negative `flow_bytes_per_sec` value fails validation;
+  `test_add_bounded_expectations_extends_suite` asserts all bounded columns are added to
+  a suite dict.
+- Deviation: `add_bounded_expectations` operates on a plain dict rather than a real GE
+  `ExpectationSuite` object, consistent with the rest of this repo's hand-rolled
+  validation suite (documented as a Phase 1 technical decision).

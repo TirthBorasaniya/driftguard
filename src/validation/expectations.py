@@ -18,8 +18,68 @@ MAX_NULL_RATE = 0.02  # at most 2% nulls per feature column
 MIN_ROW_COUNT = 10_000
 MAX_ROW_COUNT = 5_000_000
 
+# per-feature value-range bounds; None means unbounded on that side
+FEATURE_BOUNDS: dict[str, tuple[float, float | None]] = {
+    "flow_duration": (0.0, None),
+    "flow_bytes_per_sec": (0.0, None),
+    "flow_packets_per_sec": (0.0, None),
+    "total_fwd_packets": (0.0, None),
+    "total_bwd_packets": (0.0, None),
+    "packet_length_mean": (0.0, None),
+    "packet_length_std": (0.0, None),
+    "flow_iat_mean": (0.0, None),
+    "fwd_bwd_packet_ratio": (0.0, None),
+    "syn_flag_count": (0.0, None),
+}
+
 
 # ============= Bounded Assertions =============
+
+
+def _check_bounds(
+    df: pd.DataFrame,
+    col: str,
+    min_val: float | None,
+    max_val: float | None,
+    failures: list,
+) -> None:
+    """Flag a column with values outside the configured [min_val, max_val] range."""
+    if col not in df.columns:
+        failures.append(f"{col}: column missing from batch")
+        return
+    values = df[col].dropna()
+    if min_val is not None and (values < min_val).any():
+        failures.append(f"{col}: contains values below minimum {min_val}")
+    if max_val is not None and (values > max_val).any():
+        failures.append(f"{col}: contains values above maximum {max_val}")
+
+
+def add_bounded_expectations(
+    ge_suite: dict,
+    feature_bounds_dict: dict[str, tuple[float, float | None]],
+) -> dict:
+    """
+    Add per-column min/max range expectations to the validation suite config.
+
+    Parameters
+    ----------
+    ge_suite : dict
+        The suite config to extend (see save_checkpoint_config's checkpoint dict).
+    feature_bounds_dict : dict[str, tuple[float, float | None]]
+        Mapping of feature name to (min, max) bounds. None means unbounded
+        on that side.
+
+    Returns
+    -------
+    ge_suite : dict
+        The suite config with bounded expectations added.
+    """
+    ge_suite.setdefault("expectations", [])
+    for col, (min_val, max_val) in feature_bounds_dict.items():
+        ge_suite["expectations"].append(
+            {"column": col, "checks": [f"bounded_min_{min_val}_max_{max_val}"]}
+        )
+    return ge_suite
 
 
 def _check_null_rate(df: pd.DataFrame, col: str, max_null_rate: float, failures: list) -> None:
@@ -57,6 +117,7 @@ def validate_batch(
     ------------
     - each feature column null rate <= MAX_NULL_RATE (2%)
     - table row count between MIN_ROW_COUNT and MAX_ROW_COUNT
+    - each feature column value within its FEATURE_BOUNDS range
 
     Parameters
     ----------
@@ -79,6 +140,8 @@ def validate_batch(
     _check_row_count(batch_df, MIN_ROW_COUNT, MAX_ROW_COUNT, failures)
     for col in feature_cols:
         _check_null_rate(batch_df, col, MAX_NULL_RATE, failures)
+    for col, (min_val, max_val) in FEATURE_BOUNDS.items():
+        _check_bounds(batch_df, col, min_val, max_val, failures)
 
     o_passed = len(failures) == 0
 
@@ -137,6 +200,7 @@ def save_checkpoint_config(output_dir: Path | None = None) -> None:
         ]
         + [{"table": "row_count", "checks": [f"between_{MIN_ROW_COUNT}_{MAX_ROW_COUNT}"]}],
     }
+    checkpoint = add_bounded_expectations(checkpoint, FEATURE_BOUNDS)
 
     path = output_dir / "network_flow_checkpoint.json"
     with open(path, "w") as f:

@@ -1,0 +1,17 @@
+groups:
+  - name: latency_slo
+    rules:
+      - alert: PredictLatencyP95Breach
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{handler="/predict"}[5m])) > 0.150
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency on /predict exceeded 150ms SLO"
+      - alert: PredictLatencyP99Breach
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{handler="/predict"}[5m])) > 0.300
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "p99 latency on /predict exceeded 300ms SLO"

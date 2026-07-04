@@ -78,6 +78,7 @@ services:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus:/etc/prometheus/prometheus
       - prometheus_data:/prometheus
     depends_on:
       api:

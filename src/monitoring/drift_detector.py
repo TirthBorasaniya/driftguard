@@ -2,10 +2,11 @@
 
 import sqlite3
 from datetime import datetime
+from typing import Callable
 
 import pandas as pd
 from evidently import ColumnMapping
-from evidently.metrics import DataDriftTable, DatasetDriftMetric
+from evidently.metrics import ColumnDriftMetric, DataDriftTable, DatasetDriftMetric
 from evidently.report import Report
 
 from src.config import (
@@ -18,6 +19,11 @@ from src.features.engineering import FEATURE_COLS
 
 # reference distribution for PSI/drift computation (benign-only baseline)
 REFERENCE_DATA_PATH = str(REFERENCE_FILE)
+
+# PSI-specific thresholds, distinct from the DatasetDriftMetric drift_share signal
+PSI_MINOR_THRESHOLD = 0.1
+PSI_SIGNIFICANT_THRESHOLD = 0.25
+DRIFT_MIN_WINDOW = 500  # minimum events before computing PSI
 
 
 # ============= Column Mapping =============
@@ -108,6 +114,87 @@ def _parse_report(report_dict: dict) -> dict:
     }
 
 
+# ============= PSI Drift Detection =============
+
+
+def compute_psi_scores(
+    reference_df: pd.DataFrame,
+    current_df: pd.DataFrame,
+    feature_cols: list[str],
+) -> dict[str, float]:
+    """
+    Compute per-column PSI (Population Stability Index) scores using
+    Evidently's PSI stattest.
+
+    Parameters
+    ----------
+    reference_df : pd.DataFrame
+        Baseline reference dataset (benign-only distribution).
+    current_df : pd.DataFrame
+        Current window of production events.
+    feature_cols : list[str]
+        Feature columns to score.
+
+    Returns
+    -------
+    psi_scores_dict : dict[str, float]
+        Mapping of feature column name to PSI score.
+    """
+    common_cols = [
+        c for c in feature_cols
+        if c in reference_df.columns and c in current_df.columns
+    ]
+    ref = reference_df[common_cols].copy()
+    cur = current_df[common_cols].copy()
+
+    report = Report(
+        metrics=[
+            ColumnDriftMetric(column_name=col, stattest="psi")
+            for col in common_cols
+        ]
+    )
+    report.run(reference_data=ref, current_data=cur, column_mapping=get_column_mapping())
+    report_dict = report.as_dict()
+
+    psi_scores_dict = {}
+    for metric in report_dict.get("metrics", []):
+        res = metric.get("result", {})
+        column_name = res.get("column_name")
+        drift_score = res.get("drift_score")
+        if column_name is not None and drift_score is not None:
+            psi_scores_dict[column_name] = float(drift_score)
+
+    return psi_scores_dict
+
+
+def check_drift_and_trigger_retraining(
+    psi_score: float,
+    significant_threshold: float,
+    retraining_flow_fn: Callable[[], None],
+) -> bool:
+    """
+    Trigger the retraining flow when PSI crosses the significant threshold.
+
+    Parameters
+    ----------
+    psi_score : float
+        Computed PSI score for the current window.
+    significant_threshold : float
+        PSI value above which retraining is triggered.
+    retraining_flow_fn : Callable[[], None]
+        Callable that starts the Prefect retraining flow.
+
+    Returns
+    -------
+    o_triggered : bool
+        True if retraining was triggered by this call.
+    """
+    if psi_score > significant_threshold:
+        retraining_flow_fn()
+        return True
+    return False
+
+
 # ============= Database Logging =============
 
 
@@ -154,6 +241,7 @@ class StreamingDriftDetector:
         self.min_window = min_window
         self.buffer: list[dict] = []
         self.window_count = 0
+        self.last_psi_scores: dict[str, float] = {}
 
     def add_event(self, event: dict) -> bool:
         """
@@ -200,6 +288,22 @@ class StreamingDriftDetector:
                 from src.monitoring.alert_handler import handle_drift_alert
                 handle_drift_alert(result)
                 return True
+
+            self.last_psi_scores = compute_psi_scores(self.reference_df, current_df, FEATURE_COLS)
+            max_psi = max(self.last_psi_scores.values(), default=0.0)
+            print(f"  Max PSI: {max_psi:.4f}")
+
+            if max_psi <= PSI_MINOR_THRESHOLD:
+                return False
+
+            from src.orchestration.flows.retraining_flow import retraining_flow
+
+            triggered = check_drift_and_trigger_retraining(
+                max_psi, PSI_SIGNIFICANT_THRESHOLD, retraining_flow
+            )
+            if triggered:
+                print(f"  PSI RETRAINING TRIGGERED (max_psi={max_psi:.4f})")
+            return triggered
 
         except Exception as e:
             print(f"Drift report failed: {e}")
