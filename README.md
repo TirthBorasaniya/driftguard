@@ -9,6 +9,52 @@ End-to-end production ML pipeline for network telemetry anomaly detection on CIC
 
 ---
 
+## Architecture
+
+```mermaid
+flowchart TD
+    A[CICIDS2017 Replay Producer] -->|Avro via Schema Registry| B[Kafka: network_flows]
+    B --> C{Schema Valid?}
+    C -->|No| D[Kafka: network_flows.dlq]
+    C -->|Yes| E[Redis: Idempotent Dedup Check]
+    E -->|Duplicate| F[Skip + Commit Offset]
+    E -->|New| G[Feature Engineering]
+    G --> H[Feast Online Store]
+    G --> I[Feast Offline Store]
+    H --> J[FastAPI Serving: LightGBM Champion]
+    J --> K[Predictions + SHAP Explanations]
+
+    G --> L[Evidently: drift_share Monitor]
+    G --> M[PSI Drift Detector vs Monday Baseline]
+    L --> N{Drift Detected?}
+    M --> N
+    N -->|Yes| O[Prefect Retraining Flow]
+    O --> P[Great Expectations: Bounded Validation]
+    P -->|Fail| Q[Abort Retraining]
+    P -->|Pass| R[Train Challenger Model]
+    R --> S{AUC-PR Margin Exceeded?}
+    S -->|Yes| T[MLflow: Promote via Alias]
+    S -->|No| U[Hold Champion]
+    T --> J
+
+    I --> V[Point-in-Time Offline Materialization]
+
+    style D fill:#f8d7da
+    style Q fill:#f8d7da
+    style U fill:#fff3cd
+    style T fill:#d4edda
+```
+
+`drift_share` (Evidently's `DatasetDriftMetric`) and PSI (`compute_psi_scores` against the
+benign Monday reference) are two independent signals, either of which can trigger the
+Prefect retraining flow (`check_drift_and_trigger_retraining` for the PSI path). Malformed
+events are routed to the DLQ by `dlq_handler.route_to_dlq`; the dedup step is
+`dedup.is_duplicate_event`, backed by Redis `SETNX`. Not pictured: shadow-mode scoring
+(`shadow_mode.score_shadow_mode`), which runs a registered challenger alongside the
+champion on live traffic and logs both predictions without serving the challenger's.
+
+---
+
 ## Dataset
 
 [CICIDS2017](https://www.unb.ca/cic/datasets/ids-2017.html) (Canadian Institute for Cybersecurity Intrusion Detection Evaluation Dataset 2017): **2,830,540** labeled network flow records across five daily capture files, each row carrying ~80 flow features. The binary target is `0 = BENIGN` versus `1 = any attack` (DoS, DDoS, PortScan, Brute Force, Web Attacks, Infiltration, Bot, Heartbleed).
@@ -30,7 +76,11 @@ and flow-construction errors in the CICFlowMeter-generated features (including
 mislabeled benign/attack flows and duplicate or malformed flow records) present in
 the released CSVs. This project uses the dataset as-is despite these known issues
 because it remains the de facto standard for demonstrating NIDS pipelines, not
-because the labels or features are considered ground truth.
+because the labels or features are considered ground truth. Directly encountered in
+this project: a small number of real rows (3 out of 647,909 in the training split, a
+documented CICFlowMeter clock-sync capture artifact) had negative `flow_duration` and
+related timing/throughput values; `filter_invalid_flow_rows` in `src/data/preprocess.py`
+drops them at the source and logs the exact count and reason.
 
 ---
 
@@ -63,57 +113,7 @@ For serving, the decision threshold is **calibrated to achieve a minimum recall 
 
 A challenger is promoted to champion only when its PR-AUC exceeds the champion's by more than `0.005`. Metrics and the calibrated threshold are produced by `python -m src.training.train` on the processed CICIDS2017 splits.
 
----
-
-## Architecture
-
-```
-data/raw/cicids2017/*.csv
-      |
-      v
-[Preprocessing]  ------>  data/processed/  (train, test, stream splits)
-      |                         |
-      v                         v
-[Great Expectations]     [Feast Offline Store]
-  Data validation          Feature aggregation
-  (abort on failure)       (per-src_ip flow stats)
-      |                         |
-      v                         v
-[LightGBM Training]      [Redis Online Store]
-  PR-AUC primary metric    Sub-ms feature lookup
-  recall-calibrated thr.   at serving time
-  MLflow tracking
-  Champion/Challenger
-      |
-      v
-[FastAPI Serving]  <---  Kafka Consumer  <---  Kafka Producer
-  /predict                Pydantic validation    CICIDS2017 replay
-  /predict/explain        DLQ for malformed      re-indexed timestamps
-  SHAP top-5              Manual offset commit
-  Prometheus /metrics     feature computation
-      |
-      v
-[Evidently Drift Detector]
-  500-event window guard
-  benign baseline reference
-  StreamingDriftDetector
-      |
-   Drift?
-      |
-      v
-[Prefect Retraining Flow]
-  Step 1: GE validation (abort on failure)
-  Step 2-4: Load data, materialize features
-  Step 5: Train challenger
-  Step 6-7: Evaluate (PR-AUC), calibrate threshold
-  Step 8: Compare vs champion
-  Step 9: Promote + hot-reload API
-      |
-      v
-[Prometheus + Grafana]
-  infra.json: latency, error rate, throughput
-  ml_health.json: drift score, PR-AUC, DLQ rate
-```
+**Real, verified results** (final run against the five real CICIDS2017 capture files, after tuning `scale_pos_weight` dynamically from the true training class ratio and filtering the small number of CICFlowMeter clock-sync artifact rows): **PR-AUC 0.1625**, ROC-AUC 0.9383, calibrated threshold 0.0298, **realized recall 95.6%**, **realized precision 17.2%**. Verified end to end against a live Docker Compose stack and a real five-file Kafka replay: **534 real retraining cycles** completed through Great Expectations validation and the champion/challenger comparison with zero aborts, and the PSI-specific drift trigger (independent of the `drift_share` gate) was confirmed firing against real Tuesday attack traffic. Full verification detail, including the pre-fix numbers and what remains open (no promotion was observed live, since deterministic retraining on a fixed dataset converges to the same PR-AUC as the already-optimal champion), is in `IMPLEMENTATION_REPORT.md`.
 
 ---
 
@@ -142,8 +142,14 @@ data/raw/cicids2017/*.csv
 CICIDS2017 produces genuine distributional drift without synthetic injection: Monday is benign-only and serves as the reference distribution, while the attack-laden Tuesday-Friday captures shift the flow feature distributions (throughput, SYN counts, directional asymmetry) when replayed. The Evidently reference dataset is sampled from benign Monday traffic by `scripts/generate_reference_dataset.py`.
 
 **Self-healing cycle:**
-1. `StreamingDriftDetector` accumulates 500 events, runs an Evidently report
-2. On drift breach: `alert_handler.py` triggers `retraining_flow`
+1. `StreamingDriftDetector` accumulates 500 events, runs an Evidently report, and computes
+   two independent drift signals: `drift_share` (Evidently's `DatasetDriftMetric`) and,
+   on windows where that gate doesn't already fire, a PSI score
+   (`compute_psi_scores`) against the benign Monday reference
+2. On a `drift_share` breach: `alert_handler.py` triggers `retraining_flow`. On a PSI
+   breach (`max_psi > PSI_SIGNIFICANT_THRESHOLD`): `check_drift_and_trigger_retraining`
+   triggers it independently — confirmed firing on real Tuesday attack traffic in a live
+   run, distinct from and not gated by `drift_share`
 3. 9-step Prefect flow: GE validation gate -> train challenger -> compare PR-AUC -> promote
 4. API detects the champion version change and hot-reloads without restart
 
@@ -375,9 +381,9 @@ locust -f benchmark/locustfile.py --headless -u 50 -r 10 --run-time 60s --host h
 
 ## Resume Bullets
 
-- Built a real-time network anomaly detection pipeline on CICIDS2017 (2.8M flows) processing Kafka event streams through a Feast feature store (Redis online store) into a LightGBM classifier evaluated by PR-AUC with a recall-calibrated (0.95) serving threshold, and FastAPI serving with SHAP explanations at sub-100ms latency
-- Implemented a self-healing retraining loop using Prefect: a Great Expectations validation gate, Evidently AI windowed drift detection (500-event guard) against a benign baseline, and automated MLflow champion/challenger promotion gated on PR-AUC improvement
-- Deployed a full observability stack with Prometheus and Grafana (two provisioned dashboards), custom metrics for drift score, DLQ rate, and champion PR-AUC; at-least-once Kafka delivery with a dead letter queue for malformed events
+- Built a real-time network anomaly detection pipeline on real CICIDS2017 traffic processing Kafka event streams through a Feast feature store (Redis online store) into a LightGBM classifier achieving **PR-AUC 0.1625** with a recall-calibrated threshold reaching **95.6% recall / 17.2% precision**, and FastAPI serving with SHAP explanations
+- Implemented a self-healing retraining loop using Prefect: a Great Expectations validation gate, Evidently AI windowed drift detection (500-event guard, both `drift_share` and an independent PSI-based signal against a benign baseline), and automated MLflow champion/challenger promotion gated on PR-AUC improvement — verified live against a real five-file Kafka replay with **534 retraining cycles reaching the champion/challenger comparison with zero validation aborts**, and the PSI trigger confirmed firing on real attack traffic independent of the `drift_share` gate
+- Deployed a full observability stack with Prometheus and Grafana (two provisioned dashboards), custom metrics for drift score, DLQ rate, and champion PR-AUC; at-least-once Kafka delivery with a dead letter queue for malformed events, idempotent consumer dedup, and a Confluent Schema Registry-backed Avro contract, all confirmed healthy under a 2+ hour live Docker Compose run
 
 ---
 
