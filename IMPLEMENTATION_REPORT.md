@@ -576,3 +576,77 @@ the spec with justification. Sections are added as each improvement is completed
   signature declares no return value) so both the flow and the test can inspect the
   output directly, matching the spec's own test requirement ("produces a non-empty
   output").
+
+---
+
+# Root-Cause Fixes: scale_pos_weight and CICIDS2017 Sensor Artifact Rows
+
+Follow-up to the real end-to-end run's two most significant findings. **Neither fix has
+been re-verified against a real end-to-end run yet** — both are implemented and unit
+tested only. The PR-AUC, recall, and precision numbers recorded earlier in this report
+(0.1084, 0.9965, 0.0988) are from the run *before* these fixes and have not been
+superseded. The next real run against real CICIDS2017 data is what will confirm whether
+these changes actually improve PR-AUC and whether the retraining flow's promotion path
+(steps 3-9) finally executes instead of aborting at step 1-2 on every attempt.
+
+## Finding 1: Low PR-AUC root-caused to an untuned scale_pos_weight
+The real training run recorded PR-AUC 0.1084 with `scale_pos_weight=10.0`, a constant
+inherited from the original Sparkov fraud-detection base spec. The real training split
+observed in that run has a 3.1336% attack rate (roughly 31:1 negative:positive), not the
+ratio `10.0` implies (~9:1). The model was therefore substantially under-weighting the
+minority (attack) class relative to its actual real-world scarcity in this dataset.
+
+**Implemented:** `compute_scale_pos_weight(y_train)` in `src/training/train.py`,
+computing `n_negative / n_positive` from the real training labels at training time.
+Wired into `train_lgbm` immediately before the LightGBM `fit` call, replacing the static
+`scale_pos_weight` key that previously lived in `LGBM_PARAMS` (`src/config.py`). Removed
+the now-unused `settings.scale_pos_weight` field and its `SCALE_POS_WEIGHT` entry in
+`.env.example`, since the value is no longer a fixed constant.
+
+**Tests:** `tests/test_train.py` — asserts `compute_scale_pos_weight` returns `20.0` for
+100 negatives / 5 positives, and `1.0` for a balanced 50/50 split.
+
+**Not verified:** training has not been re-run with this change. Computed directly
+against the real `train.parquet` written by the last run (627,608 negative rows, 20,303
+positive rows), `compute_scale_pos_weight` would return `627608 / 20303 ≈ 30.91`,
+materially higher than the previous fixed `10.0` — whether this improves PR-AUC in
+practice is unconfirmed.
+
+## Finding 2: Every retraining attempt aborting at GE validation
+Root-caused in the last session to 2-3 rows out of 647,911 (0.0003%-0.0005%) in
+`train.parquet` with negative values in `flow_duration`, `flow_bytes_per_sec`,
+`flow_packets_per_sec`, and `flow_iat_mean` — a documented CICIDS2017/CICFlowMeter
+clock-sync capture artifact, the same class of defect cited in the README's Liu et al.
+limitations note. The Tier 1 bounded GE rule (`add_bounded_expectations`) correctly has
+no per-batch tolerance for these columns, so it correctly failed the whole suite on every
+one of the 1,347 retraining attempts observed in the real run. This was working as
+designed, not a validation bug, and the bounded rule itself was not loosened.
+
+**Implemented:** `filter_invalid_flow_rows(df, bounded_cols)` in `src/data/preprocess.py`,
+dropping any row with a negative value in `INVALID_FLOW_BOUNDED_COLS`
+(`flow_duration`, `flow_bytes_per_sec`, `flow_packets_per_sec`, `flow_iat_mean`) and
+logging the exact count dropped with the reason cited (known CICIDS2017/CICFlowMeter
+clock-sync artifact, not a pipeline defect). Wired into `run_preprocessing()` immediately
+after `impute_numeric` and before `temporal_split`, so the fix is applied at the source
+rather than allowing invalid rows to reach GE validation downstream.
+
+**Tests:** `tests/test_preprocessing.py` —
+`test_filter_invalid_flow_rows_drops_negative_values` asserts a synthetic row with a
+negative `flow_duration` is dropped and the drop count is logged;
+`test_filter_invalid_flow_rows_retains_valid_rows` asserts an all-valid batch is
+unchanged.
+
+**Not verified:** preprocessing has not been re-run against the real CICIDS2017 files
+with this change. Whether the real training data has *exactly* the 2-3 previously
+identified negative rows (removable cleanly without cascading effects on the temporal
+split boundaries or the per-`src_ip` Feast aggregation) or additional rows not yet
+surfaced is unconfirmed until the next real run.
+
+## Deviation
+The test file names in this section's spec (`tests/test_train.py`,
+`tests/test_preprocess.py`) were followed for `test_train.py` (new file, no prior test
+module existed for `src/training/train.py`'s standalone functions) but
+`filter_invalid_flow_rows` tests were added to the existing `tests/test_preprocessing.py`
+rather than a new `tests/test_preprocess.py`, since a test module for
+`src/data/preprocess.py` already exists under that name and a second file would
+duplicate/fragment test infrastructure for the same source module.

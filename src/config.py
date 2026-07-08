@@ -33,8 +33,6 @@ class Settings(BaseSettings):
     mlflow_challenger_alias: str = "challenger"
 
     # Model
-    # tune to the observed benign/attack class ratio of the loaded CICIDS2017 window
-    scale_pos_weight: float = 10.0
     # challenger must exceed champion PR-AUC by this margin to be promoted
     champion_improvement_threshold: float = 0.005
 
@@ -162,7 +160,10 @@ LGBM_PARAMS = {
     "random_state": 42,
     "n_jobs": -1,
     "verbosity": -1,
-    "scale_pos_weight": settings.scale_pos_weight,
+    # scale_pos_weight is deliberately absent here: it is computed dynamically
+    # from the real training label distribution in train.compute_scale_pos_weight,
+    # not fixed at config-load time, since the true class ratio shifts with the
+    # exact files loaded and any row-level filtering applied upstream
 }
 
 EARLY_STOPPING_ROUNDS = 50

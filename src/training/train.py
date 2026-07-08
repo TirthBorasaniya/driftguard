@@ -71,6 +71,27 @@ def load_train_test() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 # ============= Training =============
 
 
+def compute_scale_pos_weight(y_train: np.ndarray) -> float:
+    """
+    Compute the scale_pos_weight ratio from the real class distribution in
+    the training labels, rather than using a fixed constant.
+
+    Parameters
+    ----------
+    y_train : np.ndarray
+        Binary training labels (0 = benign, 1 = attack).
+
+    Returns
+    -------
+    scale_pos_weight : float
+        Ratio of negative to positive class counts, used to weight the
+        minority (attack) class during training.
+    """
+    n_pos = int((y_train == 1).sum())
+    n_neg = int((y_train == 0).sum())
+    return n_neg / n_pos
+
+
 def train_lgbm(
     X_train: np.ndarray,
     y_train: np.ndarray,
@@ -80,9 +101,10 @@ def train_lgbm(
     """
     Train a LightGBM binary classifier.
 
-    Uses scale_pos_weight for class imbalance (no SMOTE). Categorical feature
-    indices are passed to LightGBM so it splits them correctly instead of
-    treating label-encoded integers as ordered numeric values.
+    Uses scale_pos_weight for class imbalance (no SMOTE), computed dynamically
+    from the real training label distribution. Categorical feature indices
+    are passed to LightGBM so it splits them correctly instead of treating
+    label-encoded integers as ordered numeric values.
 
     Parameters
     ----------
@@ -100,7 +122,10 @@ def train_lgbm(
         if col in CATEGORICAL_COLS and i < X_train.shape[1]
     ]
 
-    model = lgb.LGBMClassifier(**LGBM_PARAMS)
+    scale_pos_weight = compute_scale_pos_weight(y_train)
+    print(f"Computed scale_pos_weight from training data: {scale_pos_weight:.4f}")
+
+    model = lgb.LGBMClassifier(**LGBM_PARAMS, scale_pos_weight=scale_pos_weight)
     model.fit(
         X_train,
         y_train,

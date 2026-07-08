@@ -84,6 +84,53 @@ def build_feature_frame(raw_df: pd.DataFrame) -> pd.DataFrame:
     return feature_df
 
 
+# columns that must be non-negative; a small number of real CICIDS2017 rows
+# violate this due to a documented CICFlowMeter clock-sync capture artifact
+INVALID_FLOW_BOUNDED_COLS = [
+    "flow_duration",
+    "flow_bytes_per_sec",
+    "flow_packets_per_sec",
+    "flow_iat_mean",
+]
+
+
+def filter_invalid_flow_rows(
+    df: pd.DataFrame,
+    bounded_cols: list[str],
+) -> pd.DataFrame:
+    """
+    Drop rows with negative values in columns that must be non-negative,
+    a known CICIDS2017/CICFlowMeter clock-sync capture artifact affecting a
+    small number of rows, rather than allowing them to reach and fail Great
+    Expectations validation downstream.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Preprocessed flow records prior to train/test split.
+    bounded_cols : list[str]
+        Columns that must be non-negative; rows violating any of these are
+        dropped.
+
+    Returns
+    -------
+    df_filtered : pd.DataFrame
+        The input with invalid rows removed.
+    """
+    present_cols = [c for c in bounded_cols if c in df.columns]
+    invalid_mask = (df[present_cols] < 0.0).any(axis=1)
+    n_dropped = int(invalid_mask.sum())
+
+    if n_dropped:
+        print(
+            f"  Dropped {n_dropped:,} row(s) with negative values in "
+            f"{present_cols} (known CICIDS2017/CICFlowMeter clock-sync "
+            "capture artifact, not a pipeline defect)"
+        )
+
+    return df.loc[~invalid_mask].reset_index(drop=True)
+
+
 # ============= Temporal Split =============
 
 
@@ -182,6 +229,7 @@ def run_preprocessing() -> None:
     raw = load_raw()
     df = build_feature_frame(raw)
     df = impute_numeric(df)
+    df = filter_invalid_flow_rows(df, INVALID_FLOW_BOUNDED_COLS)
 
     print("\nSplitting temporally...")
     splits = temporal_split(df)

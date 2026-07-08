@@ -5,7 +5,13 @@ import pandas as pd
 import pytest
 
 from src.config import ENTITY_COL, FEATURE_COLS
-from src.data.preprocess import build_src_ip_stats, impute_numeric, temporal_split
+from src.data.preprocess import (
+    INVALID_FLOW_BOUNDED_COLS,
+    build_src_ip_stats,
+    filter_invalid_flow_rows,
+    impute_numeric,
+    temporal_split,
+)
 
 
 def test_impute_numeric_fills_missing(sample_feature_df):
@@ -58,3 +64,19 @@ def test_build_src_ip_stats_columns(sample_feature_df):
         assert col in stats.columns
     assert "event_timestamp" in stats.columns
     assert "created_timestamp" in stats.columns
+
+
+def test_filter_invalid_flow_rows_drops_negative_values(sample_feature_df, capsys):
+    df = sample_feature_df.copy()
+    df.loc[df.index[0], "flow_duration"] = -1.0
+    result = filter_invalid_flow_rows(df, INVALID_FLOW_BOUNDED_COLS)
+
+    assert len(result) == len(df) - 1
+    assert (result["flow_duration"] >= 0).all()
+    assert "Dropped 1 row(s)" in capsys.readouterr().out
+
+
+def test_filter_invalid_flow_rows_retains_valid_rows(sample_feature_df):
+    df = sample_feature_df.copy()
+    result = filter_invalid_flow_rows(df, INVALID_FLOW_BOUNDED_COLS)
+    assert len(result) == len(df)
