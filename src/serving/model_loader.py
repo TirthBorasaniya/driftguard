@@ -59,8 +59,8 @@ def load_champion() -> ModelBundle:
             settings.mlflow_model_name,
             settings.mlflow_champion_alias,
         )
-        version = version_info.version
-        model_mtime = float(version)
+        model_mtime = float(version_info.version)
+        version = str(version_info.version)
         print(f"Loaded champion from MLflow registry: version {version}")
     except Exception as mlflow_err:
         print(f"MLflow load failed ({mlflow_err}), falling back to local model")

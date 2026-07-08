@@ -1,0 +1,12 @@
+[
+  "flow_duration",
+  "flow_bytes_per_sec",
+  "flow_packets_per_sec",
+  "total_fwd_packets",
+  "total_bwd_packets",
+  "packet_length_mean",
+  "packet_length_std",
+  "flow_iat_mean",
+  "fwd_bwd_packet_ratio",
+  "syn_flag_count"
+]

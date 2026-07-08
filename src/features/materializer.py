@@ -1,11 +1,28 @@
 """Materialize offline Feast features to the Redis online store."""
 
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 from src.config import FEATURE_REPO_DIR
 
 MATERIALIZATION_LOOKBACK_HOURS = 24
+
+
+def _feast_executable() -> str:
+    """
+    Locate the feast console script. feast ships no __main__.py, so
+    `python -m feast` fails with "feast is a package and cannot be directly
+    executed"; the CLI must be invoked as the installed console script.
+    """
+    venv_feast = Path(sys.executable).parent / "feast"
+    if venv_feast.exists():
+        return str(venv_feast)
+    found = shutil.which("feast")
+    if found is None:
+        raise RuntimeError("feast executable not found on PATH or alongside the interpreter")
+    return found
 
 
 def apply_feast() -> bool:
@@ -17,7 +34,7 @@ def apply_feast() -> bool:
     success : bool
     """
     result = subprocess.run(
-        [sys.executable, "-m", "feast", "apply"],
+        [_feast_executable(), "apply"],
         cwd=str(FEATURE_REPO_DIR),
         capture_output=True,
         text=True,
@@ -40,7 +57,7 @@ def materialize_to_online_store() -> bool:
 
     end_date = datetime.now().isoformat()
     result = subprocess.run(
-        [sys.executable, "-m", "feast", "materialize-incremental", end_date],
+        [_feast_executable(), "materialize-incremental", end_date],
         cwd=str(FEATURE_REPO_DIR),
         capture_output=True,
         text=True,

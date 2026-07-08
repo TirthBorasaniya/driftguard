@@ -54,31 +54,29 @@ def test_promotion_margin_constant():
 
 def test_load_champion_metrics_missing_file(tmp_path):
     train = _import_train()
-    import src.config as cfg
 
-    original = cfg.CHAMPION_METRICS_PATH
-    cfg.CHAMPION_METRICS_PATH = tmp_path / "missing.json"
+    original = train.CHAMPION_METRICS_PATH
+    train.CHAMPION_METRICS_PATH = tmp_path / "missing.json"
     try:
         assert train.load_champion_metrics() is None
     finally:
-        cfg.CHAMPION_METRICS_PATH = original
+        train.CHAMPION_METRICS_PATH = original
 
 
 def test_load_champion_metrics_reads_json(tmp_path):
     train = _import_train()
-    import src.config as cfg
 
-    original = cfg.CHAMPION_METRICS_PATH
+    original = train.CHAMPION_METRICS_PATH
     path = tmp_path / "champion_metrics.json"
     path.write_text(json.dumps({"pr_auc": 0.75, "auc_pr": 0.75, "threshold": 0.42, "version": 3}))
-    cfg.CHAMPION_METRICS_PATH = path
+    train.CHAMPION_METRICS_PATH = path
     try:
         result = train.load_champion_metrics()
         assert result is not None
         assert result["auc_pr"] == pytest.approx(0.75)
         assert result["version"] == 3
     finally:
-        cfg.CHAMPION_METRICS_PATH = original
+        train.CHAMPION_METRICS_PATH = original
 
 
 # ============= Model evaluation (PR-AUC primary) =============

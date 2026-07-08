@@ -23,6 +23,8 @@ src/features/feature_repo/data/
 
 # Predictions database (runtime state, not for git)
 predictions.db
+predictions.db-shm
+predictions.db-wal
 
 # Evidently reports (regenerated on demand)
 reports/*.html
@@ -34,6 +36,7 @@ __pycache__/
 .env
 venv/
 .venv/
+.venv*/
 *.egg-info/
 dist/
 build/

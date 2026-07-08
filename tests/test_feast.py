@@ -6,8 +6,8 @@ import pytest
 
 pytest.importorskip("feast")
 
-from src.features.engineering import FEATURE_COLS
-from src.features.feature_repo.feature_views import network_flow_features
+from src.features.engineering import FEATURE_COLS  # noqa: E402
+from src.features.feature_repo.feature_views import network_flow_features  # noqa: E402
 
 
 def test_feature_view_contains_all_ten_feature_columns():

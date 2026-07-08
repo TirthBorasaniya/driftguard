@@ -13,7 +13,8 @@ def client():
 
     from src.serving.main import app
 
-    return TestClient(app)
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def test_health_status_value(client):

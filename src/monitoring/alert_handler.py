@@ -55,6 +55,11 @@ def handle_drift_alert(drift_result: dict) -> None:
         try:
             from src.orchestration.flows.retraining_flow import retraining_flow
             retraining_flow()
-        except Exception as e:
+        # retraining_flow's own tasks raise these on missing training data
+        # (load_data_task), feast subprocess failures (materializer.py), and
+        # malformed intermediate artifacts (evaluate/promote tasks); anything
+        # else is an unexpected bug and should propagate rather than be
+        # swallowed silently in this background alert path
+        except (FileNotFoundError, RuntimeError, ValueError, OSError) as e:
             print(f"Retraining flow failed: {e}")
             _log_healing_event("RETRAIN_FAILED", str(e), drift_score=drift_share)

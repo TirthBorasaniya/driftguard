@@ -61,7 +61,10 @@ def load_cicids_file(file_path: str, column_map: dict[str, str]) -> pd.DataFrame
     df : pd.DataFrame
         Cleaned DataFrame with renamed columns and label_binary column added.
     """
-    df = pd.read_csv(file_path, low_memory=False)
+    # TrafficLabelling CSVs are not valid UTF-8 (e.g. Thursday's file contains
+    # stray Windows-1252 bytes); latin1 accepts any byte value and preserves
+    # the numeric/label columns this pipeline actually uses
+    df = pd.read_csv(file_path, low_memory=False, encoding="latin1")
 
     # CICIDS2017 headers carry leading and trailing whitespace
     df.columns = [str(c).strip() for c in df.columns]

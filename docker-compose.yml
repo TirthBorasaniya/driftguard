@@ -43,7 +43,9 @@ services:
     ports:
       - "8081:8081"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      # cp-schema-registry ships no curl/wget/nc; use bash's /dev/tcp for a
+      # plain TCP reachability check instead
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8081"]
       interval: 10s
       timeout: 5s
       retries: 5
