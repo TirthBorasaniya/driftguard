@@ -650,3 +650,154 @@ module existed for `src/training/train.py`'s standalone functions) but
 rather than a new `tests/test_preprocess.py`, since a test module for
 `src/data/preprocess.py` already exists under that name and a second file would
 duplicate/fragment test infrastructure for the same source module.
+
+---
+
+# Final Verification Run: Both Fixes Confirmed Against Real Data
+
+This closes the gap left by the previous session: both root-cause fixes are now
+verified against a real re-run of preprocessing, training, and a live Docker Compose
+streaming run. **These are the final numbers resume bullets should be written from.**
+
+## Re-run preprocessing: `filter_invalid_flow_rows` confirmed
+`python -m src.data.preprocess` against the same five real CICIDS2017 files, exact
+printed output:
+```
+Loaded total: 863,882 rows | attack rate: 7.8277%
+  Dropped 3 row(s) with negative values in ['flow_duration', 'flow_bytes_per_sec',
+  'flow_packets_per_sec', 'flow_iat_mean'] (known CICIDS2017/CICFlowMeter clock-sync
+  capture artifact, not a pipeline defect)
+train: 647,909 rows (attack: 3.1336%)
+test: 129,582 rows (attack: 1.5434%)
+stream: 86,388 rows (attack: 52.4598%)
+```
+Exactly 3 rows dropped, reasoning logged explicitly (not silent), matching the 2-3 rows
+identified in the prior session's root-cause analysis. Directly verified against the
+resulting `train.parquet`: `validate_batch` now returns `(True, [])` — **GE validation
+passes cleanly for the first time this project has run against real CICIDS2017 data.**
+
+## Re-run training: `compute_scale_pos_weight` confirmed, real numbers improved
+`python -m src.training.train`, exact printed output:
+```
+Train: (647909, 10), attack rate: 3.1336%
+Test:  (129582, 10), attack rate: 1.5434%
+Computed scale_pos_weight from training data: 30.9120
+Early stopping, best iteration is:
+[1] valid_0's auc: 0.938324  valid_0's average_precision: 0.162536
+Recall-calibrated threshold (target=0.95): 0.0298
+PR-AUC: 0.1625
+ROC-AUC: 0.9383
+Precision: 0.1719
+Recall: 0.9555
+PR-AUC: challenger=0.1625, champion=0.1084, improvement=+0.0542 (margin=0.005)
+Promoted version 2 to 'champion'
+```
+`scale_pos_weight` is printed as a computed value (30.9120), not a hardcoded number,
+confirming the dynamic computation is wired in and active.
+
+**Comparison against the previous run's numbers (not rounded or estimated):**
+
+| Metric | Previous (fixed `scale_pos_weight=10.0`) | This run (computed `30.9120`) | Change |
+|---|---|---|---|
+| PR-AUC | 0.1084 | **0.1625** | **Improved, +0.0542 (+50.0% relative)** |
+| ROC-AUC | 0.8997 | **0.9383** | Improved, +0.0386 |
+| Calibrated threshold | 0.0074 | 0.0298 | Higher (expected — less aggressive weighting needs a higher cutoff to hit the same recall target) |
+| Recall | 0.9965 | 0.9555 | **Lower**, but still clears the 0.95 target |
+| Precision | 0.0988 | **0.1719** | **Improved, +0.0731 (+74.0% relative)** |
+
+PR-AUC and precision both improved substantially; recall decreased but remains above the
+`SERVING_RECALL_TARGET = 0.95` floor. This is a real, unambiguous improvement from the
+fix, not an assumption — reported exactly as observed, including the recall trade-off.
+This standalone `python -m src.training.train` run also promoted (challenger 0.1625 vs.
+no prior champion in a fresh MLflow versioning sequence, +0.0542 over the previous
+run's champion 0.1084, exceeding the 0.005 margin) — but this script does not run GE
+validation itself; that confirmation came from the live streaming run below.
+
+## Full Docker Compose stack: all 7 services healthy again
+`docker compose up --build -d` hit the same stale zookeeper/kafka ephemeral-broker
+`NodeExistsException` seen in the previous session (containers left over from a prior
+`docker compose up`, not a new bug); resolved the same way with
+`docker compose down && docker compose up -d`. All 7 services (zookeeper, kafka, redis,
+schema-registry, api, prometheus, grafana) reported healthy, and remained healthy for
+the full ~1.5 hour duration of this run, reconfirmed via `docker compose ps` and
+`curl http://localhost:8000/health` at the end.
+
+## Live streaming run: GE validation now passes on every attempt; PSI trigger reconfirmed; no promotion in this session (explained, not a bug)
+Producer and consumer run again as separate local processes against the same live
+Kafka/Redis/Schema-Registry stack. Producer replayed all five files to completion in
+full (`Producer done. Total sent: 863,882`) at its normal ~500 events/sec pace,
+independent of the consumer.
+
+**Real, significant, and initially unexpected finding:** once GE validation started
+passing, every drift trigger began running a real full LightGBM training cycle
+(~6-10 seconds each: materialize features, load data, train, evaluate, compare) instead
+of aborting in milliseconds at validation. This dropped sustained consumer throughput
+from roughly 200-250 msg/sec in the previous (always-aborting) run to **~64 msg/sec** in
+this run. Reaching Tuesday's data (message 249,203) took approximately **68 minutes** of
+wall-clock time this session, versus roughly 10 minutes previously. This is a legitimate
+cost of the fix working as intended, not a defect, and is recorded here because it is a
+real operational characteristic of the self-healing loop once retraining actually runs
+to completion on every trigger: **at this drift-trigger frequency (drift_share fires on
+the large majority of 500-event windows — see the prior session's finding on why 0.3 is
+an easily-crossed threshold at this window size), the retraining flow cannot keep up
+with the replay rate in real time.** This is worth flagging as a capacity/tuning
+consideration for a real deployment, separate from the two fixes verified here.
+
+Consumer was run for 1 hour 23 minutes, processing 310,400 of 863,882 messages (through
+all of Monday and into Tuesday) before being stopped once sufficient evidence had been
+gathered — final exact counts from that run:
+- **535 retraining flows started, 534 reached the `compare-models` step, 0 aborted at
+  GE validation.** (Previous run: 1,347 attempts, 0 reached `compare-models`, all 1,347
+  aborted at validation.) This is the direct, unambiguous confirmation that
+  `filter_invalid_flow_rows` resolved the root cause: **the retraining flow's steps 3-9
+  (materialize, load, train, evaluate, compare, and conditionally promote) now execute
+  on every single trigger.**
+- **12 PSI-specific triggers, 523 drift_share triggers**, zero tracebacks/crashes.
+- **The PSI trigger reconfirmed firing on Tuesday's real attack traffic**, at the exact
+  same window as the previous run (`window_0501`, messages 250,001-250,500, entirely
+  within Tuesday's file, `max_psi=0.2606`) — deterministic given identical input data.
+  This specific PSI-triggered flow (`wise-puffin`) was traced end to end: validation
+  passed, materialization completed, data loaded, a challenger trained
+  (MLflow version 434, PR-AUC 0.1625), and `compare-models` correctly evaluated
+  `challenger=0.1625, champion=0.1625, improvement=+0.0000` and decided **not** to
+  promote — a correct decision given zero improvement, not a failure of the trigger or
+  the flow.
+- **0 promotions occurred anywhere in this run** (`grep -c "New champion promoted"` = 0
+  across all 534 completed flows, drift_share- and PSI-triggered alike). Root cause,
+  confirmed by direct inspection: `train_lgbm` uses `random_state=42` and every
+  retraining attempt in this session re-trained against the exact same `train.parquet`
+  with the exact same `scale_pos_weight` — training is fully deterministic here, so
+  every challenger reproduces the identical PR-AUC (0.1625) already held by the
+  champion (promoted earlier in this session via the standalone `train.py` run above).
+  With zero variance between challenger and champion, `should_promote`'s
+  `PROMOTION_PRAUC_MARGIN = 0.005` is correctly never exceeded. **This is not a residual
+  defect in the retraining flow** — the flow demonstrably reaches and correctly
+  evaluates the promotion decision (confirmed above); it is an artifact of testing
+  promotion logic with a static dataset and a fixed random seed, where there is no
+  further headroom for a deterministically-retrained model to improve over itself.
+  Observing an actual promotion via the live streaming path would require either new
+  incoming training data with a genuinely different distribution, a change to
+  `LGBM_PARAMS`/`random_state`, or manually lowering the champion's recorded metrics.
+
+## Summary: what is now confirmed and what remains open
+- **Confirmed and fixed:** the always-aborting-at-GE-validation defect. 0 aborts across
+  535 attempts in this run versus 100% abort rate (1,347/1,347) previously.
+- **Confirmed and improved:** PR-AUC (0.1084 → 0.1625) and precision (0.0988 → 0.1719)
+  from the dynamic `scale_pos_weight` fix, at the cost of a small, still-passing drop in
+  recall (0.9965 → 0.9555, target is 0.95).
+- **Confirmed unchanged:** the PSI-specific trigger still fires correctly and
+  deterministically on real Tuesday attack traffic, independent of the drift_share gate.
+- **Not confirmed / newly surfaced as an open question:** actual promotion via the live
+  self-healing loop. The flow's promotion step is proven to execute and evaluate
+  correctly, but no promotion was observed in this session because of deterministic
+  training producing zero challenger/champion divergence — this is a property of the
+  current fixed-seed, fixed-dataset test setup, not a proven defect, but it has also not
+  been positively demonstrated end-to-end. A genuinely new distribution (e.g. resuming
+  the streamed replay through Wednesday/Thursday/Friday, which contain different attack
+  patterns) or an intentionally perturbed run would be needed to observe a real
+  promotion through the live path.
+- **New operational finding:** at the default drift-trigger frequency, the retraining
+  flow cannot sustain real-time throughput against the producer's 500 events/sec replay
+  rate once every trigger completes a real training cycle (~64 msg/sec achieved vs. 500
+  msg/sec produced) — a capacity consideration for real deployment tuning, not addressed
+  in this session.
