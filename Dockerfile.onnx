@@ -1,0 +1,29 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# pandas is not in the requested minimal package list, but src/config.py
+# transitively imports it via src/features/engineering.py at module load
+# time (for FEATURE_COLS), so it is required for the container to start
+RUN pip install --no-cache-dir \
+    fastapi==0.111.0 \
+    "uvicorn[standard]==0.30.0" \
+    onnxruntime==1.27.0 \
+    numpy==1.26.4 \
+    pydantic==2.7.1 \
+    pydantic-settings==2.3.0 \
+    pandas==2.2.2
+
+# src/config.py imports FEATURE_COLS from src.features.engineering, so that
+# module and the package __init__.py files are required for the import
+# chain to resolve at runtime, in addition to the two files this task names
+COPY src/__init__.py src/__init__.py
+COPY src/config.py src/config.py
+COPY src/serving/__init__.py src/serving/__init__.py
+COPY src/serving/onnx_server.py src/serving/onnx_server.py
+COPY src/features/__init__.py src/features/__init__.py
+COPY src/features/engineering.py src/features/engineering.py
+
+EXPOSE 8001
+
+CMD ["uvicorn", "src.serving.onnx_server:app", "--host", "0.0.0.0", "--port", "8001"]

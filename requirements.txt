@@ -9,6 +9,11 @@ joblib==1.4.2
 shap==0.45.1
 scipy==1.13.0
 
+# ONNX export and inference
+onnxmltools==1.16.0
+skl2onnx==1.20.0
+onnxruntime==1.27.0
+
 # Experiment tracking
 mlflow==2.12.2
 setuptools<70
