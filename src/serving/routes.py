@@ -17,6 +17,8 @@ from src.serving.schemas import (
     HealthResponse,
     NetworkFlowRequest,
     PredictionResponse,
+    PredictionStatsResponse,
+    RecentPredictionItem,
 )
 from src.serving.shadow_mode import log_shadow_prediction, score_shadow_mode
 
@@ -239,22 +241,40 @@ async def predict_explain(
     )
 
 
-@router.get("/predictions/recent")
-async def recent_predictions(limit: int = 50):
-    """Return the most recent N predictions."""
+@router.get("/predictions/recent", response_model=list[RecentPredictionItem])
+async def recent_predictions(limit: int = 50) -> list[RecentPredictionItem]:
+    """
+    Return the most recent N predictions as a public read-only feed.
+
+    Columns are selected explicitly rather than with SELECT *, so that
+    adding a column to the predictions table cannot silently widen this
+    public payload. features_json and event_id are excluded because both
+    can carry the flow five-tuple; see RecentPredictionItem.
+    """
     limit = max(1, min(limit, 1000))
     async with aiosqlite.connect(str(DB_PATH)) as db:
         await db.execute("PRAGMA journal_mode=WAL")
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
-            "SELECT * FROM predictions ORDER BY id DESC LIMIT ?", (limit,)
+            """SELECT anomaly_score, is_anomaly, threshold, model_version, timestamp
+               FROM predictions ORDER BY id DESC LIMIT ?""",
+            (limit,),
         )
-        return [dict(row) for row in await cursor.fetchall()]
+        return [
+            RecentPredictionItem(
+                anomaly_score=row["anomaly_score"],
+                is_anomaly=bool(row["is_anomaly"]),
+                threshold=row["threshold"],
+                model_version=row["model_version"],
+                timestamp=row["timestamp"],
+            )
+            for row in await cursor.fetchall()
+        ]
 
 
-@router.get("/predictions/stats")
-async def prediction_stats():
-    """Return aggregate prediction statistics."""
+@router.get("/predictions/stats", response_model=PredictionStatsResponse)
+async def prediction_stats() -> PredictionStatsResponse:
+    """Return aggregate-only prediction statistics; no per-event detail."""
     async with aiosqlite.connect(str(DB_PATH)) as db:
         await db.execute("PRAGMA journal_mode=WAL")
         cursor = await db.execute("""
@@ -264,10 +284,10 @@ async def prediction_stats():
         """)
         row = await cursor.fetchone()
         if row and row[0]:
-            return {
-                "total_predictions": row[0],
-                "total_anomaly": row[1] or 0,
-                "anomaly_rate": (row[1] or 0) / row[0],
-                "avg_score": row[2],
-            }
-        return {"total_predictions": 0}
+            return PredictionStatsResponse(
+                total_predictions=row[0],
+                total_anomaly=row[1] or 0,
+                anomaly_rate=(row[1] or 0) / row[0],
+                avg_score=row[2],
+            )
+        return PredictionStatsResponse(total_predictions=0)

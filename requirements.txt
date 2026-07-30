@@ -1,7 +1,7 @@
 # Python 3.11 strictly
 
 # Core ML
-lightgbm==4.3.0
+lightgbm==4.6.0
 scikit-learn==1.4.2
 pandas==2.2.2
 numpy==1.26.4
@@ -16,7 +16,15 @@ onnxruntime==1.27.0
 
 # Experiment tracking
 mlflow==2.12.2
-setuptools<70
+# setuptools upper bound is required, lower bound is a security fix.
+# Upper: mlflow 2.12.2 does `import pkg_resources` in
+# mlflow/utils/requirements_utils.py, and pkg_resources was removed from
+# setuptools in 81.0.0, so >=81 breaks mlflow with ModuleNotFoundError.
+# Lower: >=78.1.1 fixes CVE-2024-6345 (package_index RCE, fixed 70.0.0) and
+# CVE-2025-47273 (path traversal, fixed 78.1.1). The previous `setuptools<70`
+# pin blocked both fixes for no stated reason. Verified: 80.10.2 passes the
+# full suite (93 passed, 1 skipped, identical to the old pin).
+setuptools>=78.1.1,<81
 
 # Orchestration
 prefect==2.19.7
