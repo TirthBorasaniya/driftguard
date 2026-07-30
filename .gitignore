@@ -27,19 +27,51 @@ mlflow.db
 data/feast_registry.db
 src/features/feature_repo/data/
 
+# Shadow-mode prediction log — SHADOW_LOG_PATH in src/config.py writes live
+# champion/challenger prediction pairs here at serving time. Runtime output,
+# never for git.
+models/shadow_predictions.csv
+
 # Predictions database (runtime state, not for git)
 predictions.db
 predictions.db-shm
 predictions.db-wal
+*.db
+*.sqlite
+*.sqlite3
 
 # Evidently reports (regenerated on demand)
 reports/*.html
+
+# Secrets and credentials — never commit
+.env
+.env.*
+!.env.example
+credentials.json
+service-account*.json
+id_rsa
+id_rsa.pub
+*.pem
+*.key
+*.pfx
+*.p12
+.npmrc
+.pypirc
+.netrc
+
+# Model weights and checkpoints — regenerate or fetch, do not commit
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.gguf
+*.h5
+*.onnx
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
-.env
 venv/
 .venv/
 .venv*/
@@ -47,12 +79,24 @@ venv/
 dist/
 build/
 
+# Node (defensive; no JS in this project today)
+node_modules/
+
 # Jupyter
 .ipynb_checkpoints/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Editor backups and scratch
+*.bak
+*.orig
+*.rej
+*~
+.claude/
+.cursorrules
+scratch/
 
 # Testing
 .pytest_cache/
