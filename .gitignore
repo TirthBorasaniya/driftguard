@@ -69,8 +69,9 @@ htmlcov/
 CLAUDE_domain_migration.md
 P1_COMBINED_SESSION.md
 
-# Session audit report and project spec (ignored per explicit instruction;
-# both are already tracked from prior commits, this only affects future
-# untracked copies / new clones)
+# Local build/session scaffolding — untracked and ignored. These describe how
+# the project was developed rather than how it works, and CLAUDE.md in
+# particular still documented a superseded domain. Kept locally, not published.
 AUDIT_REPORT.md
 CLAUDE.md
+IMPLEMENTATION_REPORT.md
