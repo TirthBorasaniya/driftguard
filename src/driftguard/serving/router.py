@@ -125,6 +125,15 @@ class Router:
         """
         Score a batch with the champion, or split it between champion and challenger in canary.
 
+        Parameters
+        ----------
+        event_ids : list[str]
+            Event ids of the batch.
+        names : list[str]
+            Feature names of the matrix columns.
+        matrix : np.ndarray
+            Feature matrix, shape (n, len(names)).
+
         Returns
         -------
         response : dict

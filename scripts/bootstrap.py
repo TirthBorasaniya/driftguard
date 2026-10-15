@@ -38,7 +38,25 @@ def initial_frame(dataset: str, source: str, bootstrap_cfg: dict):
 
 
 def bootstrap_champion(dataset: str, source: str, settings, o_force: bool) -> str | None:
-    """Train and register the initial champion unless one exists."""
+    """
+    Train and register the initial champion unless one exists.
+
+    Parameters
+    ----------
+    dataset : str
+        Dataset name.
+    source : str
+        `dataset` or `synthetic`.
+    settings : object
+        Runtime settings.
+    o_force : bool
+        Replace an existing champion.
+
+    Returns
+    -------
+    version : str or None
+        The registered version, or None when a champion already existed.
+    """
     registry = MlflowRegistry(settings.mlflow_tracking_uri)
     name = model_name(dataset)
     existing = registry.get_alias(name, CHAMPION)

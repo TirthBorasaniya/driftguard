@@ -122,6 +122,15 @@ def iter_messages(
     message : tuple
         (kind, event_id, record, event_time_ms of the most recent flow), where kind is
         `flow`, `label`, or `duplicate`.
+
+    Parameters
+    ----------
+    frame : pd.DataFrame
+        Stream-ordered adapter frame.
+    dataset : str
+        Dataset name.
+    plan : PlanConfig
+        Emission plan parameters.
     """
     features = feature_names(dataset)
     # per-column arrays keep native dtypes; an object matrix of the full frame would not fit in RAM

@@ -62,6 +62,16 @@ def redis_replay_features(frame: pd.DataFrame) -> pd.DataFrame:
 
     Uses the same computer as the consumer. Features do not depend on batch boundaries, so the
     replayed values equal the served ones for an in-order stream.
+
+    Parameters
+    ----------
+    frame : pd.DataFrame
+        Adapter rows with ids, event time, IPs, and source fields.
+
+    Returns
+    -------
+    enriched : pd.DataFrame
+        The rows with the behavioral feature columns added.
     """
     from redis import Redis
 

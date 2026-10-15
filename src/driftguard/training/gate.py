@@ -83,6 +83,21 @@ def paired_bootstrap_delta(
     Each resample draws event indices with replacement once and evaluates both models on the
     same indices. Work is done in chunks of resamples to bound memory.
 
+    Parameters
+    ----------
+    labels : np.ndarray
+        Binary labels of the shadow events.
+    champion : np.ndarray
+        Champion scores.
+    challenger : np.ndarray
+        Challenger scores.
+    n_resamples : int
+        Number of bootstrap resamples.
+    seed : int
+        Random seed.
+    chunk : int
+        Resamples evaluated per vectorized block.
+
     Returns
     -------
     deltas : np.ndarray
@@ -115,6 +130,26 @@ def shadow_gate(
 
     Promote if `delta_pr_auc >= margin` and the 95% bootstrap interval's lower bound is above 0;
     otherwise decline.
+
+    Parameters
+    ----------
+    labels : np.ndarray
+        Binary labels of the shadow events.
+    champion : np.ndarray
+        Champion scores.
+    challenger : np.ndarray
+        Challenger scores.
+    margin : float
+        Minimum PR-AUC improvement to promote.
+    n_resamples : int
+        Number of bootstrap resamples.
+    seed : int
+        Random seed.
+
+    Returns
+    -------
+    decision : GateDecision
+        The decision with its PR-AUC difference, interval, and counts.
     """
     labels = np.asarray(labels).astype(int)
     if labels.sum() == 0:

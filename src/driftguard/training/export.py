@@ -75,6 +75,21 @@ def parity_check(
     """
     Compare native and ONNX scores on up to `n_rows` rows.
 
+    Parameters
+    ----------
+    model : lgb.LGBMClassifier
+        Fitted LightGBM classifier.
+    session : ort.InferenceSession
+        ONNX Runtime session of the exported model.
+    x : np.ndarray
+        Feature matrix to sample rows from.
+    n_rows : int
+        Maximum rows compared.
+    max_abs_diff : float
+        Largest tolerated absolute difference.
+    seed : int
+        Seed for the row sample.
+
     Returns
     -------
     observed : float

@@ -45,10 +45,28 @@ def rollback(
     The rolled-back version keeps no alias; `previous_champion` is cleared because it now
     serves. The serving watcher swaps sessions within one poll interval.
 
+    Parameters
+    ----------
+    registry : Registry
+        Model registry.
+    redis_client : object
+        Holds the rollout mode.
+    dataset : str
+        Dataset name.
+    log_path : Path
+        `promotions.jsonl` path.
+    reason : str
+        Reason recorded in the log.
+
     Raises
     ------
     RolloutConflictError
         If no previous champion exists.
+
+    Returns
+    -------
+    entry : dict
+        The appended `promotions.jsonl` record.
     """
     name = model_name(dataset)
     previous = registry.get_alias(name, PREVIOUS)
@@ -78,10 +96,28 @@ def promote(
     """
     After a passed canary: `champion` -> `previous_champion`, then `challenger` -> `champion`.
 
+    Parameters
+    ----------
+    registry : Registry
+        Model registry.
+    redis_client : object
+        Holds the rollout mode.
+    dataset : str
+        Dataset name.
+    log_path : Path
+        `promotions.jsonl` path.
+    evidence : dict[str, Any]
+        Gate and canary numbers recorded with the promotion.
+
     Raises
     ------
     RolloutConflictError
         If there is no challenger.
+
+    Returns
+    -------
+    entry : dict
+        The appended `promotions.jsonl` record.
     """
     name = model_name(dataset)
     challenger = registry.get_alias(name, CHALLENGER)
