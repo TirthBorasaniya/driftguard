@@ -136,3 +136,10 @@ Context: a kind cluster is heavy and must run alone.
 Decision: CI validates the chart with `helm lint`, `helm template`, and kubeconform using CRD schemas for Strimzi, KEDA, and the Prometheus Operator, and a nightly job runs a reduced E3b on kind with synthetic data.
 Alternatives: no manifest validation outside a cluster (rejected: errors would surface only at install time).
 Consequences: kubeconform downloads CRD schemas at CI time.
+
+## D-020: KSWIN on a subsampled score stream (policy version 4)
+Status: accepted (2026-10-15)
+Context: the first E2 smoke run (2 seeds, 24 windows) showed `kswin_score` flagging 68 to 92 of every 100 stationary windows and the combined policy raising 15 to 26 false alarms per 100 windows, about one spurious retraining trigger every four to five windows. Cause: KSWIN runs a KS test per update, so a 5,000-event window holds thousands of overlapping tests at alpha 0.005; on stationary continuous scores it fired about 4 times per 5,000 events in 40 of 40 windows. A window-level count threshold cannot fix this: KSWIN resets after each detection, and its count under a persistent strong shift (about 6 per 5,000 events) was no larger than under the null (about 4).
+Decision: keep the specified parameters (alpha 0.005, window 500, statistic 100) and feed KSWIN one score in `stride` events, with stride 100 (`kswin.stride`), so a window holds about 50 tests. The policy version is 4 because the semantics of `kswin_score` changed. Measured on beta-distributed scores: 4.8% of stationary windows flagged, a strong shift detected in the first window in 8 of 8 runs, a mild shift within two windows in 6 of 8.
+Alternatives: a calibrated detection-count limit (rejected: no power, see above), feeding window means (rejected: needs hundreds of windows of history), dropping KSWIN (rejected: the specification requires it).
+Consequences: KSWIN needs about 50,000 events before its first test; the strided stream spans more event time than the specification's wording implies. E2 reports the resulting rates.

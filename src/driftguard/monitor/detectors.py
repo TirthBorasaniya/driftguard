@@ -111,28 +111,48 @@ class AdwinErrorDetector:
 
 class KswinScoreDetector:
     """
-    KSWIN on champion scores (`river.drift.KSWIN`).
+    KSWIN on a subsampled champion score stream (`river.drift.KSWIN`).
+
+    KSWIN runs a KS test on every update. Fed every event, a 5,000-event window holds thousands
+    of overlapping tests at alpha 0.005 and fires in essentially every stationary window
+    (measured: about 4 detections per 5,000 events in 40 of 40 windows). Its detection count is
+    also no larger under a persistent shift than under the null, because it resets after each
+    detection, so a count threshold cannot repair this. Testing one score in `stride` keeps the
+    spec parameters and bounds the tests per window: with stride 100 about 5% of stationary
+    windows are flagged, a strong shift is caught in the first window, and a mild one within two
+    (measured on beta-distributed scores; see DECISIONS D-020).
 
     Parameters
     ----------
     alpha, window_size, stat_size : SPEC 5.2 defaults 0.005, 500, 100.
+    stride : int
+        Every `stride`-th score is fed to KSWIN; the offset persists across windows.
     seed : int
         Seed for KSWIN's sampling of the reference sub-window.
     """
 
     def __init__(
-        self, alpha: float = 0.005, window_size: int = 500, stat_size: int = 100, seed: int = 42
+        self,
+        alpha: float = 0.005,
+        window_size: int = 500,
+        stat_size: int = 100,
+        seed: int = 42,
+        stride: int = 100,
     ):
         from river.drift import KSWIN
 
+        if stride < 1:
+            raise ValueError("stride must be at least 1")
         self._factory = lambda: KSWIN(
             alpha=alpha, window_size=window_size, stat_size=stat_size, seed=seed
         )
         self.detector = self._factory()
+        self.stride = int(stride)
+        self._seen = 0
 
     def window_signal(self, scores: np.ndarray) -> tuple[float, int]:
         """
-        Feed one window of scores.
+        Feed one window of scores (subsampled by `stride`).
 
         Returns
         -------
@@ -143,6 +163,9 @@ class KswinScoreDetector:
         """
         detections = 0
         for score in np.asarray(scores, dtype=np.float64):
+            self._seen += 1
+            if self._seen % self.stride:
+                continue
             self.detector.update(float(score))
             if self.detector.drift_detected:
                 detections += 1

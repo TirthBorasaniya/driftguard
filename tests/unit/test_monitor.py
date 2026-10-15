@@ -152,15 +152,12 @@ def test_adwin_detects_error_rate_step():
     assert detector.consume() == 1.0 and detector.consume() == 0.0
 
 
-def test_kswin_detects_score_shift_and_not_stationary():
+def test_kswin_wrapper_detects_a_step_change_at_stride_one():
     rng = np.random.default_rng(2)
-    stationary = KswinScoreDetector(0.005, 500, 100, seed=1)
-    signal, _ = stationary.window_signal(rng.beta(2, 8, 600))
-    shifted = KswinScoreDetector(0.005, 500, 100, seed=1)
-    shifted.window_signal(rng.beta(2, 8, 600))
-    shifted_signal, detections = shifted.window_signal(rng.beta(8, 2, 600))
-    assert shifted_signal == 1.0 and detections >= 1
-    assert signal in (0.0, 1.0)
+    detector = KswinScoreDetector(0.005, 500, 100, seed=1, stride=1)
+    detector.window_signal(rng.beta(2, 8, 600))
+    signal, detections = detector.window_signal(rng.beta(8, 2, 600))
+    assert signal == 1.0 and detections >= 1
 
 
 def test_score_psi():
@@ -226,7 +223,7 @@ def test_monitor_emits_event_after_debounced_shift():
         events += core.on_flows(flows) + core.on_predictions(_preds(flows, 0.9))
     assert len(events) == 1
     event = events[0]
-    assert event["severity"] == "HIGH" and event["policy_version"] == 3
+    assert event["severity"] == "HIGH" and event["policy_version"] == 4
     assert event["signals"]["psi_max"] > 0.5 and "window_end_ms" in event
 
 
@@ -259,3 +256,40 @@ def test_labels_join_predictions_for_adwin():
     core.on_labels([{"event_id": f["event_id"], "label": 1} for f in flows])
     assert core.policy.labeled_since_promotion == 10
     assert not core._pending_predictions and not core._pending_labels
+
+
+def test_kswin_stride_bounds_stationary_false_alarms_and_still_detects_shift():
+    """Regression: per-event KSWIN tests fired in every stationary window (E2 smoke run)."""
+    rng = np.random.default_rng(5)
+    window = 5000
+    per_event = KswinScoreDetector(0.005, 500, 100, seed=1, stride=1)
+    per_event_flags = [per_event.window_signal(rng.beta(2, 8, window))[0] for _ in range(5)]
+    assert sum(per_event_flags) >= 4  # the spec parameters on every event: constant false alarms
+
+    flagged = 0
+    for seed in range(3):
+        strided = KswinScoreDetector(0.005, 500, 100, seed=seed, stride=100)
+        for _ in range(14):  # 700 tests: the window fills after 500
+            flagged += strided.window_signal(rng.beta(2, 8, window))[0] > 0
+    assert flagged <= 6  # about 5 percent of 42 windows, never most of them
+
+    detector = KswinScoreDetector(0.005, 500, 100, seed=2, stride=100)
+    for _ in range(14):
+        detector.window_signal(rng.beta(2, 8, window))
+    signals = [detector.window_signal(rng.beta(8, 2, window))[0] for _ in range(3)]
+    assert max(signals) == 1.0
+
+
+def test_kswin_stride_offset_persists_across_windows():
+    detector = KswinScoreDetector(stride=10)
+    detector.window_signal(np.zeros(25))
+    assert detector._seen == 25
+    detector.window_signal(np.zeros(25))
+    assert detector._seen == 50
+    with pytest.raises(ValueError):
+        KswinScoreDetector(stride=0)
+
+
+def test_policy_version_four_carries_kswin_stride():
+    config = policy_config()
+    assert config["version"] == 4 and config["kswin"]["stride"] == 100

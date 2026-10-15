@@ -85,7 +85,10 @@ class MonitorCore:
         adwin, kswin = policy_config["adwin"], policy_config["kswin"]
         self.adwin = AdwinErrorDetector(float(adwin["delta"]))
         self.kswin = KswinScoreDetector(
-            float(kswin["alpha"]), int(kswin["window_size"]), int(kswin["stat_size"])
+            float(kswin["alpha"]),
+            int(kswin["window_size"]),
+            int(kswin["stat_size"]),
+            stride=int(kswin["stride"]),
         )
         self.reference: Reference | None = None
         # predictions awaiting labels and labels awaiting predictions, bounded and oldest-first

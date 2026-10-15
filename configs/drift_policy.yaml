@@ -1,5 +1,5 @@
 # Drift decision policy (SPEC 5.3, 12). Versioned; drift events carry policy_version.
-version: 3
+version: 4
 window_size: 5000
 debounce_windows: 2
 cooldown_windows: 3
@@ -9,7 +9,8 @@ psi_share_feature_threshold: 0.2
 psi_bins: 10
 psi_floor: 1.0e-6
 adwin: {delta: 0.002}
-kswin: {alpha: 0.005, window_size: 500, stat_size: 100}
+# stride 100: KSWIN tests one score in 100; per-event tests fire in every stationary window
+kswin: {alpha: 0.005, window_size: 500, stat_size: 100, stride: 100}
 severity_high: {psi_max: 0.5, adwin: true}
 # Kyoto uses calendar-month windows; a month closes after this many later events in both streams
 month_close_after_events: 1000

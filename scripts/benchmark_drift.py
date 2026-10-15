@@ -13,7 +13,7 @@ from driftguard.common.settings import REPO_ROOT
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "eval" / "e2.yaml"
 NOTES = (
     "Offline benchmark with the production monitor core (PSI, Evidently, score PSI, KSWIN, ADWIN, "
-    "policy v3). Base segments are shuffled, hence stationary; one shift is injected per run at a "
+    "policy v4). Base segments are shuffled, hence stationary; one shift is injected per run at a "
     "random onset. Delay is measured in windows from the onset window; a miss is no detection "
     "within the horizon. False alarms count flagged windows before onset."
 )
