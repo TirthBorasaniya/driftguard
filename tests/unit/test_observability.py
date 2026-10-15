@@ -200,3 +200,239 @@ def test_e3_renderer_uses_step_level_latency_fields():
     }
     text = render_e3_load(doc)
     assert "Round-trip p99 ms" in text and "Worst 30 s model p99 ms" in text and "1.4" in text
+
+
+def test_e2_renderer_shows_the_data_quality_gate_table():
+    from driftguard.common.render import render_e2_drift_detection
+
+    detector = {
+        "median_delay_windows": 1.0,
+        "iqr_delay_windows": [0.0, 2.0],
+        "miss_rate": 0.0,
+        "false_alarms_per_100_windows": 0.0,
+    }
+    detectors = {name: detector for name in ("psi_max", "policy")}
+    result = {
+        "detectors": detectors,
+        "gx": {
+            "failures_per_100_windows_before_onset": 0.0,
+            "share_of_windows_blocked_after_onset": 0.25,
+        },
+    }
+    doc = {
+        "metrics": {
+            "datasets": {
+                "cicids2017": {"results": {"label_coverage=1.0": {"covariate:factor=1.5": result}}}
+            }
+        }
+    }
+    text = render_e2_drift_detection(doc)
+    assert "Data-quality gate" in text and "Share of post-onset windows blocked" in text
+    assert "0.25" in text
+
+
+def test_headline_lists_every_guarantee_with_a_results_file(tmp_path):
+    """Regression: several rows were silently dropped by a failed text replacement."""
+    from driftguard.common.render import HEADLINE_ROWS, render_headline
+
+    names = {row[1] for row in HEADLINE_ROWS}
+    assert names == {
+        "e1_model_quality",
+        "e2_drift_detection",
+        "e3_load",
+        "e3b_k8s_autoscaling",
+        "e4_adaptation",
+        "e5_gate",
+    }
+    assert len(HEADLINE_ROWS) == 7
+    text = render_headline(tmp_path)
+    assert text.count("not yet run") == 7 and "results/e5_gate.json" in text
+
+
+def _rates():
+    return {
+        "pr_auc": 0.9,
+        "roc_auc": 0.95,
+        "precision": 0.8,
+        "recall": 0.7,
+        "n": 10,
+        "n_positive": 3,
+        "oracle_precision_at_recall_0_99": 0.6,
+    }
+
+
+def _protocol():
+    return {
+        "threshold": 0.9,
+        "test": {**_rates(), "per_family_recall": {"DDoS": {"recall": 0.5, "n": 4}}},
+        "test_at_validation_recall_0_99": {"threshold": 0.8, "precision": 0.7, "recall": 0.99},
+    }
+
+
+def test_every_renderer_and_headline_extractor_works_on_a_realistic_document():
+    """Regression: E3b and E4 renderers and several headline rows were never exercised."""
+    from driftguard.common.render import HEADLINE_ROWS, RENDERERS
+
+    detector = {
+        "median_delay_windows": 1.0,
+        "iqr_delay_windows": [0.0, 2.0],
+        "miss_rate": 0.0,
+        "false_alarms_per_100_windows": 0.0,
+        "detected": 2,
+        "runs": 2,
+    }
+    latency = {
+        "roundtrip_p50": 1.0,
+        "roundtrip_p95": 2.0,
+        "roundtrip_p99": 3.0,
+        "model_p50": 0.5,
+        "model_p95": 0.7,
+        "model_p99": 0.9,
+        "worst_30s_model_p99": 1.4,
+    }
+    step = {
+        "target_rate_eps": 100,
+        "achieved_consumption_rate_eps": 99.0,
+        "lag": {"max": 5.0, "p95": 4.0},
+        "latency_ms": latency,
+        "dlq_rate": 0.0,
+        "redis_peak_used_memory_bytes": 2 * 1024**2,
+        "saturated": False,
+    }
+    decision = {
+        "decision": "promote",
+        "expected": "promote",
+        "delta_pr_auc": 0.5,
+        "ci_low": 0.4,
+        "ci_high": 0.6,
+        "margin": 0.01,
+        "n_resamples": 1000,
+        "matches_expected": True,
+    }
+    docs = {
+        "e1_model_quality": {
+            "protocols": {"time_ordered": _protocol(), "within_day": _protocol()},
+            "ablations": {
+                "o_drop_dst_port": _protocol(),
+                "attempted_policy": {"benign": _protocol()},
+                "stream_features": {
+                    "cicflowmeter_only": _protocol(),
+                    "cicflowmeter_plus_behavioral": _protocol(),
+                },
+            },
+        },
+        "e2_drift_detection": {
+            "datasets": {
+                "cicids2017": {
+                    "results": {
+                        "label_coverage=1.0": {
+                            "covariate:factor=1.5": {
+                                "detectors": {n: detector for n in ("psi_max", "policy")},
+                                "gx": {
+                                    "failures_per_100_windows_before_onset": 0.0,
+                                    "share_of_windows_blocked_after_onset": 0.0,
+                                },
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "e3_load": {
+            "partitions": 6,
+            "runs": {
+                "stream_features=on/idle": {"steps": [step], "saturation_rate_eps": None},
+                "stream_features=on/retraining": {"steps": [step], "saturation_rate_eps": None},
+            },
+        },
+        "e3b_k8s_autoscaling": {
+            "phases": [{"rate_eps": 250, "duration_s": 300}],
+            "scaling": {
+                "time_to_first_new_pod_ready_s": 40,
+                "peak_lag": 9000,
+                "max_replicas": 6,
+                "time_to_drain_below_threshold_s": 120,
+                "scale_in_after_load_drop_s": 200,
+            },
+            "duplicate_and_loss_check": {
+                "produced_distinct": 10,
+                "predicted_distinct": 10,
+                "duplicates": 0,
+                "lost": 0,
+            },
+            "figure": "results/figures/e3b_replicas.png",
+        },
+        "e4_adaptation": {
+            "kyoto": {
+                "modes": {
+                    "static": {
+                        "pr_auc_per_year": {"2008": {"pr_auc": 0.5}},
+                        "lifecycle": {
+                            "drift_events": 0,
+                            "promoted_to_canary": 0,
+                            "promotions": 0,
+                            "declines": 0,
+                            "rollbacks": 0,
+                        },
+                    },
+                    "adaptive": {
+                        "pr_auc_per_year": {"2008": {"pr_auc": 0.7}},
+                        "lifecycle": {
+                            "drift_events": 2,
+                            "promoted_to_canary": 1,
+                            "promotions": 1,
+                            "declines": 0,
+                            "rollbacks": 0,
+                        },
+                    },
+                },
+                "figure": "results/f.png",
+            },
+            "cicids2017": {
+                "modes": {
+                    "adaptive": {
+                        "lifecycle": {
+                            "drift_events": 1,
+                            "promoted_to_canary": 0,
+                            "promotions": 0,
+                            "declines": 1,
+                            "rollbacks": 0,
+                        }
+                    }
+                },
+                "figure": "results/c.png",
+            },
+        },
+        "e5_gate": {
+            "shadow_events": 3000,
+            "shadow_positive": 300,
+            "all_match_expected": True,
+            "challengers": {
+                "better": decision,
+                "equal": {**decision, "decision": "decline", "expected": "decline"},
+            },
+        },
+        "onnx_latency": {
+            "rows": [
+                {
+                    "batch_size": 1,
+                    "native": {"p50_ms": 0.2, "p95_ms": 0.3},
+                    "onnx": {"p50_ms": 0.01, "p95_ms": 0.02},
+                    "speedup_p50": 20.0,
+                }
+            ]
+        },
+    }
+    for name, payload in docs.items():
+        doc = {
+            "run_id": f"t_{name}",
+            "git_sha": "abc",
+            "environment": {"hardware": "h"},
+            "metrics": payload,
+            "notes": "",
+        }
+        _, renderer = RENDERERS[name]
+        assert renderer(doc)
+        for _claim, row_name, _make, extractor in HEADLINE_ROWS:
+            if row_name == name:
+                assert extractor(doc)

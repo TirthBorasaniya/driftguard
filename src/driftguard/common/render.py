@@ -209,7 +209,31 @@ def render_e2_drift_detection(doc: dict[str, Any]) -> str:
                             item["false_alarms_per_100_windows"],
                         ]
                     )
+            gx_rows = [
+                [
+                    shift,
+                    result["gx"]["failures_per_100_windows_before_onset"],
+                    result["gx"]["share_of_windows_blocked_after_onset"],
+                ]
+                for shift, result in shifts.items()
+                if "gx" in result
+            ]
             parts += [f"**{dataset}, {coverage}**", "", table(headers, rows, digits=2), ""]
+            if gx_rows:
+                parts += [
+                    "Data-quality gate (windows failing it never emit a drift event):",
+                    "",
+                    table(
+                        [
+                            "Shift",
+                            "Clean-window failures / 100 windows",
+                            "Share of post-onset windows blocked",
+                        ],
+                        gx_rows,
+                        digits=2,
+                    ),
+                    "",
+                ]
     return "\n".join(parts).rstrip()
 
 
@@ -487,7 +511,20 @@ RENDERERS: dict[str, tuple[str, Renderer | None]] = {
     "e3b_k8s_autoscaling": ("make loadtest-k8s", render_e3b),
 }
 
+
 # each headline row: (guarantee, results name, make target, extractor returning the value text)
+def _headline_features(doc: dict[str, Any]) -> str:
+    """Effect of the stream-computed behavioral features on time-ordered PR-AUC and recall."""
+    stream = doc["metrics"].get("ablations", {}).get("stream_features")
+    if not stream:
+        return "ablation not part of this E1 run"
+    base, plus = stream["cicflowmeter_only"]["test"], stream["cicflowmeter_plus_behavioral"]["test"]
+    return (
+        f"time-ordered PR-AUC {fmt(base['pr_auc'])} -> {fmt(plus['pr_auc'])}; "
+        f"recall at the stored threshold {fmt(base['recall'])} -> {fmt(plus['recall'])}"
+    )
+
+
 HEADLINE_ROWS: list[tuple[str, str, str, Callable[[dict[str, Any]], str]]] = [
     (
         "Sustained ingestion and p99 latency, with and without retraining",
@@ -496,23 +533,63 @@ HEADLINE_ROWS: list[tuple[str, str, str, Callable[[dict[str, Any]], str]]] = [
         _headline_e3,
     ),
     (
+        "Detection delay and false-alarm rate on injected shifts",
+        "e2_drift_detection",
+        "make benchmark-drift",
+        _headline_e2,
+    ),
+    (
+        "PR-AUC recovery through gated retraining versus a static model",
+        "e4_adaptation",
+        "make eval-e4",
+        _headline_e4,
+    ),
+    (
         "Precision and recall at target recall, time-ordered",
         "e1_model_quality",
         "make eval-e1",
         _headline_e1,
     ),
+    (
+        "Effect of stream-computed behavioral features",
+        "e1_model_quality",
+        "make eval-e1",
+        _headline_features,
+    ),
+    (
+        "No model serves without passing the gate; promote, decline, rollback",
+        "e5_gate",
+        "make eval-e5",
+        _headline_e5,
+    ),
+    (
+        "Consumers scale on Kafka lag without duplicate or lost predictions",
+        "e3b_k8s_autoscaling",
+        "make loadtest-k8s",
+        _headline_e3b,
+    ),
 ]
 
 
 def render_headline(results_dir: Path) -> str:
-    """Render the headline table, one row per SPEC guarantee with its evidence file."""
+    """
+    Render the headline table, one row per SPEC guarantee with its evidence file.
+
+    Parameters
+    ----------
+    results_dir : Path
+        Directory with results JSON files.
+
+    Returns
+    -------
+    markdown : str
+        Table of guarantee, measured result (or `not yet run`), and evidence path.
+    """
     rows = []
     for claim, name, make_target, extractor in HEADLINE_ROWS:
         doc = load_results(name, results_dir)
         value = extractor(doc) if doc is not None else f"not yet run (`{make_target}`)"
         rows.append([claim, value, f"`results/{name}.json`"])
-    if not rows:
-        return "No experiments registered."
     return table(["Guarantee", "Measured result", "Evidence"], rows)
 
 

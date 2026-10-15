@@ -396,6 +396,7 @@ def run_dataset(base: BaseData, config: dict, policy_config: dict) -> dict[str, 
                     int(rng.integers(1 << 31)),
                     base.reference_rows,
                     base.attack_pool,
+                    physical_bounds(base.dataset),
                 )
                 core = run_segment(
                     base,

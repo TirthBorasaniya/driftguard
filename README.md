@@ -17,7 +17,12 @@ run" has no measured value. CI fails if these tables differ from what the render
 | Guarantee | Measured result | Evidence |
 |---|---|---|
 | Sustained ingestion and p99 latency, with and without retraining | not yet run (`make loadtest`) | `results/e3_load.json` |
-| Precision and recall at target recall, time-ordered | time-ordered PR-AUC 0.9399, precision n/a at recall 0.0000 (target 0.95) | `results/e1_model_quality.json` |
+| Detection delay and false-alarm rate on injected shifts | not yet run (`make benchmark-drift`) | `results/e2_drift_detection.json` |
+| PR-AUC recovery through gated retraining versus a static model | not yet run (`make eval-e4`) | `results/e4_adaptation.json` |
+| Precision and recall at target recall, time-ordered | not yet run (`make eval-e1`) | `results/e1_model_quality.json` |
+| Effect of stream-computed behavioral features | not yet run (`make eval-e1`) | `results/e1_model_quality.json` |
+| No model serves without passing the gate; promote, decline, rollback | not yet run (`make eval-e5`) | `results/e5_gate.json` |
+| Consumers scale on Kafka lag without duplicate or lost predictions | not yet run (`make loadtest-k8s`) | `results/e3b_k8s_autoscaling.json` |
 <!-- results:headline:end -->
 
 ## Architecture
@@ -138,35 +143,7 @@ a random stratified split is an upper-bound reference only. Ablations drop `dst_
 CICFlowMeter features with and without the behavioral features. Reproduce with `make eval-e1`.
 
 <!-- results:e1_model_quality:start -->
-| Protocol | PR-AUC | ROC-AUC | Precision @ thr | Recall @ thr | Threshold | Precision @ recall 0.99 | Test rows |
-|---|---|---|---|---|---|---|---|
-| Time-ordered (train Mon-Wed, test Thu-Fri) | 0.9399 | 0.9670 | n/a | 0.0000 | 0.9945 | 0.7718 | 909,632 |
-| Within-day temporal split | 0.9999 | 1.0000 | 1.0000 | 0.3344 | 0.9947 | 0.9995 | 629,994 |
-| Random stratified (upper-bound reference only) | 1.0000 | 1.0000 | 1.0000 | 0.9509 | 0.9948 | 1.0000 | 629,992 |
-
-Per-family recall at the stored threshold (time-ordered test days):
-
-| Family | Recall | Test rows |
-|---|---|---|
-| Botnet | 0.0000 | 736 |
-| DDoS | 0.0000 | 95,144 |
-| Infiltration | 0.0000 | 36 |
-| Infiltration - Portscan | 0.0000 | 71,767 |
-| Portscan | 0.0000 | 159,066 |
-| Web Attack - Brute Force | 0.0000 | 73 |
-| Web Attack - SQL Injection | 0.0000 | 13 |
-| Web Attack - XSS | 0.0000 | 18 |
-
-Ablations (time-ordered protocol):
-
-| Protocol | PR-AUC | ROC-AUC | Precision @ thr | Recall @ thr | Threshold | Precision @ recall 0.99 | Test rows |
-|---|---|---|---|---|---|---|---|
-| Without dst_port | 0.8355 | 0.8699 | n/a | 0.0000 | 0.9944 | 0.6454 | 909,632 |
-| attempted_policy=benign | 0.9399 | 0.9670 | n/a | 0.0000 | 0.9945 | 0.7718 | 909,632 |
-| attempted_policy=attack | 0.9615 | 0.9812 | n/a | 0.0000 | 0.9944 | 0.9315 | 909,632 |
-| attempted_policy=drop | 0.9436 | 0.9688 | n/a | 0.0000 | 0.9945 | 0.7854 | 903,568 |
-
-_Source: `results/e1_model_quality.json`, run `2026-10-15T21-09-52Z_e1_model_quality`, git `cb21ee8`, hardware: arm, 10 logical CPUs._
+Not yet run. Reproduce with `make eval-e1`.
 <!-- results:e1_model_quality:end -->
 
 ### E2 Drift detection benchmark
@@ -204,17 +181,7 @@ Not yet run. Reproduce with `make loadtest-k8s`.
 ### ONNX Runtime latency
 
 <!-- results:onnx_latency:start -->
-| Batch | Native p50 ms | ONNX p50 ms | Native p95 ms | ONNX p95 ms | Speedup (p50) |
-|---|---|---|---|---|---|
-| 1 | 0.1583 | 0.0039 | 0.1695 | 0.0042 | 40.8387 |
-| 8 | 0.1649 | 0.0161 | 0.1744 | 0.0169 | 10.2515 |
-| 32 | 0.1810 | 0.0285 | 0.1894 | 0.0296 | 6.3617 |
-| 128 | 0.2465 | 0.0706 | 0.2540 | 0.0739 | 3.4887 |
-| 256 | 0.3301 | 0.1250 | 0.3393 | 0.1292 | 2.6407 |
-| 512 | 0.5010 | 0.2315 | 0.5191 | 0.2395 | 2.1640 |
-| 1,024 | 0.8603 | 0.4554 | 0.8873 | 0.4664 | 1.8892 |
-
-_Source: `results/onnx_latency.json`, run `2026-10-15T21-12-52Z_onnx_latency`, git `e16b796`, hardware: arm, 10 logical CPUs._
+Not yet run. Reproduce with `make benchmark-onnx`.
 <!-- results:onnx_latency:end -->
 
 ### E4 End-to-end adaptation
@@ -235,15 +202,7 @@ labeled events: clearly better (trained on post-drift data), equal (same data an
 Reproduce with `make eval-e5`.
 
 <!-- results:e5_gate:start -->
-3,000 shadow events (284 attacks), margin 0.01, 1,000 paired resamples.
-
-| Challenger | Expected | Decision | Delta PR-AUC | 95% CI | Matches |
-|---|---|---|---|---|---|
-| better | promote | promote | 0.7980 | [0.7677, 0.8276] | yes |
-| equal | decline | decline | 0.0000 | [0.0000, 0.0000] | yes |
-| worse | decline | decline | -0.1481 | [-0.1747, -0.1219] | yes |
-
-_Source: `results/e5_gate.json`, run `2026-10-15T21-12-17Z_e5_gate`, git `cb21ee8`, hardware: arm, 10 logical CPUs._
+Not yet run. Reproduce with `make eval-e5`.
 <!-- results:e5_gate:end -->
 
 ### First version (historical, transcribed)
@@ -302,7 +261,19 @@ Feast `PushSource` (D-006).
 - Kafka runs a single broker with replication factor 1, and the kind cluster is a single node.
 - Evidently costs about 0.6 s per window at the default sample size, which bounds how fast the
   monitor can close windows on large streams.
-- The pipeline has not been verified end to end from a clean clone by running it.
+- The training flow's Great Expectations check uses the specified fitted percentile bounds, which
+  reject drifted windows such as real Thursday and Friday CICIDS2017 traffic as data-quality
+  failures; the alternative (`gx.training_bounds: physical_bounds`) changes a stated rule and is an
+  open decision (DECISIONS D-022). The monitor's suite checks data quality only.
+- KSWIN tests one score in 100 (policy version 4) because per-event tests fire in nearly every
+  stationary window; it needs about 50,000 events before its first test (D-020).
+- Stream features cost about 18 Redis commands per event so that they do not depend on how Kafka
+  splits polls (D-011); E3 reports the resulting throughput.
+- The Compose and Kubernetes stacks, the integration and end-to-end tests, E3, E3b, E4, the demo,
+  and CI have never been run: development had no container runtime. The Helm chart passes
+  `helm lint`, `helm template`, and kubeconform but has never been installed on a cluster.
+- On the Kyoto subsets the attack share of the base period is high (about 60%), so the prior-shift
+  benchmark there lowers the attack proportion instead of raising it.
 
 ## Repository layout
 

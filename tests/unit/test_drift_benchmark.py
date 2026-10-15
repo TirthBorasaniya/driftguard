@@ -169,3 +169,35 @@ def test_summarize_gx_counts():
     assert summary["failures_per_100_windows_before_onset"] == 5.0
     assert summary["share_of_windows_blocked_after_onset"] == 0.25
     assert summarize_gx([])["failures_per_100_windows_before_onset"] is None
+
+
+def test_covariate_shift_respects_physical_limits():
+    """Regression: noise pushed non-negative features below zero, so the shift was broken data."""
+    from driftguard.training.validate import GXValidator, physical_bounds
+
+    seg = _segment(3000, seed=4)
+    seg["flow_duration"] = np.where(np.arange(len(seg)) % 3 == 0, 0.0, seg["flow_duration"])
+    bounds = physical_bounds("cicids2017")
+    unclipped, _ = inject(
+        seg,
+        "covariate",
+        500,
+        {"features": ["flow_duration"], "factor": 1.2, "noise_std": 0.5},
+        seed=1,
+        reference=seg,
+    )
+    clipped, _ = inject(
+        seg,
+        "covariate",
+        500,
+        {"features": ["flow_duration"], "factor": 1.2, "noise_std": 0.5},
+        seed=1,
+        reference=seg,
+        bounds=bounds,
+    )
+    assert unclipped["flow_duration"].min() < 0  # the injector used to emit invalid values
+    assert clipped["flow_duration"].min() >= 0.0
+    assert not np.allclose(clipped["flow_duration"][500:], seg["flow_duration"][500:])
+    quality = GXValidator({"flow_duration": bounds["flow_duration"]}, 1.0, 100, name="inj")
+    assert quality.validate(clipped[["flow_duration"]]).success
+    assert not quality.validate(unclipped[["flow_duration"]]).success

@@ -44,12 +44,39 @@ def covariate_shift(
     noise_std: float,
     reference_std: dict[str, float],
     rng: np.random.Generator,
+    bounds: dict[str, list[float]] | None = None,
 ) -> tuple[pd.DataFrame, int]:
     """
     Multiply selected features by `factor` and add Gaussian noise from row `onset` onwards.
 
     Noise has standard deviation `noise_std * reference_std[feature]`, so it is scaled to each
-    feature. Labels are unchanged.
+    feature. Labels are unchanged. Shifted values are clipped to the feature's physical limits:
+    a covariate shift is a change of distribution, and unclipped noise would push non-negative
+    features below zero, which is broken data, not drift.
+
+    Parameters
+    ----------
+    segment : pd.DataFrame
+        Stationary rows in stream order.
+    onset : int
+        Row index where the shift starts.
+    features : list of str
+        Features to shift.
+    factor : float
+        Multiplicative factor.
+    noise_std : float
+        Noise scale relative to each feature's reference standard deviation.
+    reference_std : dict
+        Reference standard deviation per feature.
+    rng : np.random.Generator
+        Random generator.
+    bounds : dict or None
+        Feature name to `[low, high]` physical limits applied after the shift.
+
+    Returns
+    -------
+    shifted : tuple of (pd.DataFrame, int)
+        The shifted segment and the number of rows modified.
     """
     out = segment.copy()
     n_after = len(out) - onset
@@ -57,6 +84,8 @@ def covariate_shift(
         values = out[name].to_numpy(dtype=np.float64)
         noise = rng.normal(0.0, noise_std * reference_std[name], size=n_after)
         values[onset:] = values[onset:] * factor + noise
+        if bounds is not None and name in bounds:
+            values[onset:] = np.clip(values[onset:], bounds[name][0], bounds[name][1])
         out[name] = values.astype(out[name].dtype)
     return out, n_after
 
@@ -143,6 +172,7 @@ def inject(
     seed: int,
     reference: pd.DataFrame,
     attack_pool: pd.DataFrame | None = None,
+    bounds: dict[str, list[float]] | None = None,
 ) -> tuple[pd.DataFrame, InjectionManifest]:
     """
     Apply one shift to a stationary segment.
@@ -163,6 +193,8 @@ def inject(
         Reference rows used for feature scales and region quantiles.
     attack_pool : pd.DataFrame or None
         Attack rows for prior shifts.
+    bounds : dict or None
+        Physical limits per feature; covariate shifts are clipped to them.
 
     Returns
     -------
@@ -184,6 +216,7 @@ def inject(
             float(params["noise_std"]),
             std,
             rng,
+            bounds,
         )
     elif shift_type == "prior":
         shifted, modified = prior_shift(
