@@ -1,0 +1,176 @@
+{{- $tp := .Values.thirdParty }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driftguard-schema-registry
+  labels: {{- include "driftguard.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "driftguard.selector" "schema-registry" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "driftguard.selector" "schema-registry" | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: schema-registry
+          image: {{ $tp.schemaRegistry.image }}
+          env:
+            - {name: SCHEMA_REGISTRY_HOST_NAME, value: driftguard-schema-registry}
+            - {name: SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS, value: {{ .Values.kafka.bootstrap | quote }}}
+            - {name: SCHEMA_REGISTRY_LISTENERS, value: "http://0.0.0.0:8081"}
+            - {name: SCHEMA_REGISTRY_SCHEMA_COMPATIBILITY_LEVEL, value: backward}
+          ports: [{containerPort: 8081}]
+          readinessProbe:
+            httpGet: {path: /subjects, port: 8081}
+            periodSeconds: 10
+          resources: {{- toYaml $tp.schemaRegistry.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: driftguard-schema-registry
+  labels: {{- include "driftguard.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "driftguard.selector" "schema-registry" | nindent 4 }}
+  ports: [{port: 8081, targetPort: 8081}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: driftguard-redis
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storage.className }}
+  resources: {requests: {storage: {{ $tp.redis.storage }}}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driftguard-redis
+  labels: {{- include "driftguard.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {{- include "driftguard.selector" "redis" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "driftguard.selector" "redis" | nindent 8 }}
+    spec:
+      containers:
+        - name: redis
+          image: {{ $tp.redis.image }}
+          args: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+          ports: [{containerPort: 6379}]
+          readinessProbe:
+            exec: {command: ["redis-cli", "ping"]}
+            periodSeconds: 10
+          volumeMounts: [{name: data, mountPath: /data}]
+          resources: {{- toYaml $tp.redis.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: driftguard-redis}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: driftguard-redis
+spec:
+  selector: {{- include "driftguard.selector" "redis" | nindent 4 }}
+  ports: [{port: 6379, targetPort: 6379}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: driftguard-mlflow
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storage.className }}
+  resources: {requests: {storage: {{ $tp.mlflow.storage }}}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driftguard-mlflow
+  labels: {{- include "driftguard.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {{- include "driftguard.selector" "mlflow" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "driftguard.selector" "mlflow" | nindent 8 }}
+    spec:
+      containers:
+        - name: mlflow
+          image: {{ $tp.mlflow.image }}
+          command: ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000",
+                    "--backend-store-uri", "sqlite:////mlflow/mlflow.db",
+                    "--artifacts-destination", "/mlflow/artifacts", "--serve-artifacts"]
+          ports: [{containerPort: 5000}]
+          readinessProbe:
+            httpGet: {path: /health, port: 5000}
+            periodSeconds: 10
+          volumeMounts: [{name: data, mountPath: /mlflow}]
+          resources: {{- toYaml $tp.mlflow.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: driftguard-mlflow}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: driftguard-mlflow
+spec:
+  selector: {{- include "driftguard.selector" "mlflow" | nindent 4 }}
+  ports: [{port: 5000, targetPort: 5000}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: driftguard-prefect
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storage.className }}
+  resources: {requests: {storage: {{ $tp.prefectServer.storage }}}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driftguard-prefect-server
+  labels: {{- include "driftguard.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {{- include "driftguard.selector" "prefect-server" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "driftguard.selector" "prefect-server" | nindent 8 }}
+    spec:
+      containers:
+        - name: prefect-server
+          image: {{ $tp.prefectServer.image }}
+          command: ["prefect", "server", "start", "--host", "0.0.0.0", "--port", "4200"]
+          env:
+            - {name: PREFECT_SERVER_API_HOST, value: 0.0.0.0}
+          ports: [{containerPort: 4200}]
+          readinessProbe:
+            httpGet: {path: /api/health, port: 4200}
+            periodSeconds: 10
+          volumeMounts: [{name: data, mountPath: /root/.prefect}]
+          resources: {{- toYaml $tp.prefectServer.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: driftguard-prefect}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: driftguard-prefect-server
+spec:
+  selector: {{- include "driftguard.selector" "prefect-server" | nindent 4 }}
+  ports: [{port: 4200, targetPort: 4200}]

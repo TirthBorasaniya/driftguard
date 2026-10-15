@@ -1,5 +1,6 @@
 """Scoring consumer service: decode, validate, dedupe, write features, score, log (SPEC 4.1)."""
 
+import contextlib
 import os
 import signal
 import socket
@@ -409,6 +410,10 @@ class ConsumerService:
     def _on_revoke(self, _consumer, partitions) -> None:
         revoked = {(p.topic, p.partition) for p in partitions}
         self._assigned = [tp for tp in self._assigned if tp not in revoked]
+        for _, partition in revoked:
+            # a revoked partition's lag is now reported by its new owner; drop the stale series
+            with contextlib.suppress(KeyError):
+                CONSUMER_LAG.remove(self.dataset, str(partition))
         logger.info("partitions_revoked", partitions=[p.partition for p in partitions])
 
     def _update_lag(self) -> None:

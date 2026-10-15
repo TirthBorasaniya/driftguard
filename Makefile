@@ -134,3 +134,31 @@ eval-e4:
 	./scripts/check_stack_free.sh compose
 	$(PY) scripts/eval_e4.py
 	$(PY) scripts/render_results.py
+
+.PHONY: k8s-up k8s-down loadtest-k8s k8s-validate chart-files
+
+HELM ?= $(if $(wildcard .cache/bin/helm),.cache/bin/helm,helm)
+KUBECONFORM ?= $(if $(wildcard .cache/bin/kubeconform),.cache/bin/kubeconform,kubeconform)
+
+k8s-up:
+	./scripts/k8s_up.sh
+
+k8s-down:
+	./scripts/k8s_down.sh
+
+loadtest-k8s:
+	$(PY) scripts/loadtest_k8s.py
+	$(PY) scripts/render_results.py
+
+chart-files:
+	$(PY) scripts/sync_chart_files.py
+
+k8s-validate:
+	$(PY) scripts/sync_chart_files.py --check
+	$(HELM) lint deploy/k8s/charts/driftguard --set secrets.adminToken=x --set secrets.ipHashSalt=y
+	$(HELM) template driftguard deploy/k8s/charts/driftguard -f deploy/k8s/values-kind.yaml \
+		--set secrets.adminToken=x --set secrets.ipHashSalt=y > .tmp/rendered.yaml
+	$(KUBECONFORM) -strict -summary -kubernetes-version 1.31.0 \
+		-schema-location default \
+		-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+		.tmp/rendered.yaml deploy/k8s/strimzi/*.yaml deploy/k8s/keda/*.yaml

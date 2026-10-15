@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driftguard-serving
+  labels: {{- include "driftguard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: serving
+spec:
+  replicas: {{ .Values.serving.replicas }}
+  selector:
+    matchLabels: {{- include "driftguard.selector" "serving" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "driftguard.selector" "serving" | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      {{- include "driftguard.podSecurity" . | nindent 6 }}
+      containers:
+        - name: serving
+          image: {{ include "driftguard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["uvicorn", "driftguard.serving.app:app", "--host", "0.0.0.0", "--port", "8001"]
+          env:
+            {{- include "driftguard.env" . | nindent 12 }}
+            - {name: SERVICE_NAME, value: serving}
+          ports: [{name: http, containerPort: 8001}]
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 5
+          resources: {{- toYaml .Values.serving.resources | nindent 12 }}
+          volumeMounts: [{name: data, mountPath: /app/data}]
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: driftguard-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: driftguard-serving
+  labels: {{- include "driftguard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: serving
+spec:
+  type: NodePort
+  selector: {{- include "driftguard.selector" "serving" | nindent 4 }}
+  ports: [{name: http, port: 8001, targetPort: http, nodePort: {{ .Values.serving.nodePort }}}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: driftguard-serving
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "driftguard.selector" "serving" | nindent 6 }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: driftguard-serving
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: driftguard-serving}
+  minReplicas: {{ .Values.serving.hpa.minReplicas }}
+  maxReplicas: {{ .Values.serving.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: {{ .Values.serving.hpa.targetCPUUtilizationPercentage }}}

@@ -1,0 +1,21 @@
+# Scale scoring consumers on Kafka consumer lag (SPEC 8.1).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: driftguard-consumer
+  namespace: driftguard
+spec:
+  scaleTargetRef:
+    name: driftguard-consumer
+  pollingInterval: 15
+  cooldownPeriod: 60
+  minReplicaCount: 1
+  maxReplicaCount: 6          # equals the partition count
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: driftguard-kafka-bootstrap:9092
+        consumerGroup: driftguard-scoring
+        topic: flows.cicids2017.v1
+        lagThreshold: "5000"
+        offsetResetPolicy: earliest

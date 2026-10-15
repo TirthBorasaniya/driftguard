@@ -1,0 +1,53 @@
+{{- if .Values.bootstrap.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: driftguard-bootstrap
+  labels: {{- include "driftguard.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      enableServiceLinks: false
+      {{- include "driftguard.podSecurity" . | nindent 6 }}
+      containers:
+        - name: bootstrap
+          image: {{ include "driftguard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "scripts/bootstrap.py", "--dataset", {{ .Values.dataset | quote }},
+                    "--source", {{ .Values.bootstrap.source | quote }}]
+          env: {{- include "driftguard.env" . | nindent 12 }}
+          resources: {{- toYaml .Values.bootstrap.resources | nindent 12 }}
+          volumeMounts: {{- include "driftguard.dataMounts" . | nindent 12 }}
+      volumes: {{- include "driftguard.dataVolumes" . | nindent 8 }}
+{{- end }}
+{{- if .Values.producer.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: driftguard-producer
+  labels: {{- include "driftguard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: producer
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      enableServiceLinks: false
+      {{- include "driftguard.podSecurity" . | nindent 6 }}
+      containers:
+        - name: producer
+          image: {{ include "driftguard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "driftguard.producer.replay"]
+          args: {{- toYaml .Values.producer.args | nindent 12 }}
+          env: {{- include "driftguard.env" . | nindent 12 }}
+          resources: {{- toYaml .Values.producer.resources | nindent 12 }}
+          volumeMounts: {{- include "driftguard.dataMounts" . | nindent 12 }}
+      volumes: {{- include "driftguard.dataVolumes" . | nindent 8 }}
+{{- end }}

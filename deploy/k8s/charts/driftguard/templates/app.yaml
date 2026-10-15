@@ -1,0 +1,65 @@
+{{- $root := . }}
+{{- $components := list
+  (dict "name" "consumer" "module" "driftguard.consumer.main" "port" 9101 "replicas" 1 "data" true)
+  (dict "name" "monitor" "module" "driftguard.monitor.main" "port" 9102 "replicas" 1 "data" false)
+  (dict "name" "orchestrator" "module" "driftguard.orchestrator.main" "port" 9103 "replicas" 1 "data" true)
+}}
+{{- range $c := $components }}
+{{- $values := index $root.Values $c.name }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driftguard-{{ $c.name }}
+  labels: {{- include "driftguard.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $c.name }}
+spec:
+  {{- if ne $c.name "consumer" }}
+  replicas: {{ $c.replicas }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "driftguard.selector" $c.name | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "driftguard.selector" $c.name | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      {{- include "driftguard.podSecurity" $root | nindent 6 }}
+      containers:
+        - name: {{ $c.name }}
+          image: {{ include "driftguard.image" $root }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          command: ["python", "-m", {{ $c.module | quote }}]
+          env:
+            {{- include "driftguard.env" $root | nindent 12 }}
+            - {name: SERVICE_NAME, value: {{ $c.name }}}
+            - {name: METRICS_PORT, value: {{ $c.port | quote }}}
+            - name: INSTANCE_ID
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+          ports: [{name: metrics, containerPort: {{ $c.port }}}]
+          livenessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 10
+          resources: {{- toYaml $values.resources | nindent 12 }}
+          {{- if $c.data }}
+          volumeMounts: {{- include "driftguard.dataMounts" $root | nindent 12 }}
+          {{- end }}
+      {{- if $c.data }}
+      volumes: {{- include "driftguard.dataVolumes" $root | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: driftguard-{{ $c.name }}
+  labels: {{- include "driftguard.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $c.name }}
+spec:
+  selector: {{- include "driftguard.selector" $c.name | nindent 4 }}
+  ports: [{name: metrics, port: {{ $c.port }}, targetPort: metrics}]
+{{- end }}

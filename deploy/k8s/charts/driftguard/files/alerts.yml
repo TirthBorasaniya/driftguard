@@ -1,0 +1,69 @@
+groups:
+  - name: latency_slo
+    rules:
+      - alert: ScoringLatencyP95Breach
+        expr: histogram_quantile(0.95, sum by (le, dataset) (rate(driftguard_scoring_latency_seconds_bucket[5m]))) > 0.025
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 scoring latency above 25 ms per batch for {{ $labels.dataset }}"
+      - alert: ScoringLatencyP99Breach
+        expr: histogram_quantile(0.99, sum by (le, dataset) (rate(driftguard_scoring_latency_seconds_bucket[5m]))) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "p99 scoring latency above the 50 ms per-batch SLO for {{ $labels.dataset }}"
+  - name: pipeline
+    rules:
+      - alert: ConsumerLagHigh
+        expr: sum by (dataset) (driftguard_consumer_lag) > 50000
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Consumer lag above 50,000 messages for {{ $labels.dataset }}"
+      - alert: DLQRateHigh
+        expr: >
+          sum by (dataset) (rate(driftguard_events_dlq_total[5m]))
+          / sum by (dataset) (rate(driftguard_events_consumed_total[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 1% of consumed events go to the DLQ for {{ $labels.dataset }}"
+      - alert: ScoringUnavailable
+        expr: increase(driftguard_scoring_unavailable_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scoring failed after retries; batches were dead-lettered ({{ $labels.dataset }})"
+  - name: model_lifecycle
+    rules:
+      - alert: DriftDetected
+        expr: increase(driftguard_drift_events_total{severity="HIGH"}[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "HIGH severity drift event for {{ $labels.dataset }}"
+      - alert: RetrainingFailed
+        expr: >
+          increase(driftguard_retraining_runs_total{status="failed"}[15m]) > 0
+          or increase(driftguard_retraining_triggers_total{result="submit_failed"}[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "A retraining run failed or could not be submitted ({{ $labels.dataset }})"
+      - alert: DataQualityFailed
+        expr: increase(driftguard_data_quality_failures_total[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "A monitor window failed the GX suite; retraining paused ({{ $labels.dataset }})"
+      - alert: CanaryRolledBack
+        expr: increase(driftguard_promotions_total{result="rolled_back"}[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "A canary or champion was rolled back for {{ $labels.dataset }}"

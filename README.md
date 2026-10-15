@@ -61,6 +61,15 @@ with `make up && make bootstrap && make loadtest`.
 Not yet run. Reproduce with `make loadtest`.
 <!-- results:e3_load:end -->
 
+### E3b Kubernetes autoscaling
+
+On a local kind cluster, the load holds at 250 events/s, steps to 2,000 events/s, and drops
+back; KEDA scales the consumers on lag. Reproduce with `make k8s-up && make loadtest-k8s`.
+
+<!-- results:e3b_k8s_autoscaling:start -->
+Not yet run. Reproduce with `make loadtest-k8s`.
+<!-- results:e3b_k8s_autoscaling:end -->
+
 ### ONNX Runtime latency
 
 <!-- results:onnx_latency:start -->

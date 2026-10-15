@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: driftguard-prefect-worker
+  labels: {{- include "driftguard.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prefect-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "driftguard.selector" "prefect-worker" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "driftguard.selector" "prefect-worker" | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      {{- include "driftguard.podSecurity" . | nindent 6 }}
+      containers:
+        - name: prefect-worker
+          image: {{ include "driftguard.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - >
+              (prefect work-pool inspect driftguard-process > /dev/null 2>&1
+              || prefect work-pool create driftguard-process --type process)
+              && prefect --no-prompt deploy --all
+              && prefect worker start --pool driftguard-process
+          env:
+            {{- include "driftguard.env" . | nindent 12 }}
+            - {name: SERVICE_NAME, value: prefect-worker}
+          resources: {{- toYaml .Values.prefectWorker.resources | nindent 12 }}
+          volumeMounts: {{- include "driftguard.dataMounts" . | nindent 12 }}
+      volumes: {{- include "driftguard.dataVolumes" . | nindent 8 }}

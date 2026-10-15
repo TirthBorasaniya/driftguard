@@ -381,6 +381,44 @@ def _headline_e4(doc: dict[str, Any]) -> str:
     )
 
 
+def render_e3b(doc: dict[str, Any]) -> str:
+    """Render E3b: scaling timings and the duplicate and loss check."""
+    m = doc["metrics"]
+    s, c = m["scaling"], m["duplicate_and_loss_check"]
+    rows = [
+        [
+            "Time from load step to first new consumer pod Ready (s)",
+            s["time_to_first_new_pod_ready_s"],
+        ],
+        ["Peak consumer lag (messages)", s["peak_lag"]],
+        ["Maximum replicas", s["max_replicas"]],
+        [
+            "Time to drain lag below 5,000 after the load drop (s)",
+            s["time_to_drain_below_threshold_s"],
+        ],
+        ["Scale-in after the load drop (s)", s["scale_in_after_load_drop_s"]],
+        ["Distinct event ids produced", c["produced_distinct"]],
+        ["Distinct event ids predicted", c["predicted_distinct"]],
+        ["Duplicate predictions", c["duplicates"]],
+        ["Lost events", c["lost"]],
+    ]
+    phases = ", ".join(f"{p['rate_eps']:g} eps for {p['duration_s']:g} s" for p in m["phases"])
+    out = f"kind, phases: {phases}.\n\n" + table(["Measure", "Value"], rows, digits=1)
+    if m.get("figure"):
+        out += f"\n\n![Consumer replicas over time]({m['figure']})"
+    return out
+
+
+def _headline_e3b(doc: dict[str, Any]) -> str:
+    m = doc["metrics"]
+    c = m["duplicate_and_loss_check"]
+    return (
+        f"1 to {m['scaling']['max_replicas']} consumers on lag, first new pod in "
+        f"{fmt(m['scaling']['time_to_first_new_pod_ready_s'], 0)} s, "
+        f"{fmt(c['duplicates'])} duplicates, {fmt(c['lost'])} lost (kind)"
+    )
+
+
 RENDERERS: dict[str, tuple[str, Renderer | None]] = {
     "v1_verified_run": ("make import-v1-results", render_v1_verified_run),
     "e1_model_quality": ("make eval-e1", render_e1_model_quality),
@@ -389,6 +427,7 @@ RENDERERS: dict[str, tuple[str, Renderer | None]] = {
     "e3_load": ("make loadtest", render_e3_load),
     "onnx_latency": ("make benchmark-onnx", render_onnx_latency),
     "e4_adaptation": ("make eval-e4", render_e4_adaptation),
+    "e3b_k8s_autoscaling": ("make loadtest-k8s", render_e3b),
 }
 
 # each headline row: (guarantee, results name, make target, extractor returning the value text)

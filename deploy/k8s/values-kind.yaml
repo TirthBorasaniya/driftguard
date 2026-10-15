@@ -1,0 +1,12 @@
+# Overrides for the local kind cluster (installed by scripts/k8s_up.sh).
+image:
+  repository: driftguard-app
+  tag: dev
+  pullPolicy: Never
+storage:
+  className: standard
+  dataSize: 20Gi
+  rawHostPath: /driftguard-data/raw
+bootstrap:
+  enabled: true
+  source: dataset

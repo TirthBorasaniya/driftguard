@@ -1,0 +1,70 @@
+# Default values; deploy/k8s/values-kind.yaml overrides for the local kind cluster.
+dataset: cicids2017
+image:
+  repository: driftguard-app
+  tag: dev
+  pullPolicy: IfNotPresent
+
+secrets:
+  # supplied at install time from .env by scripts/k8s_up.sh; never committed
+  adminToken: ""
+  ipHashSalt: ""
+
+kafka:
+  bootstrap: driftguard-kafka-bootstrap:9092
+
+storage:
+  className: standard
+  dataSize: 20Gi
+  # host path of the repository data/ directory inside the kind node (read-only raw datasets)
+  rawHostPath: /driftguard-data/raw
+
+prometheusRelease: kube-prometheus-stack
+
+thirdParty:
+  schemaRegistry:
+    image: confluentinc/cp-schema-registry:7.9.0
+    resources: {requests: {cpu: 100m, memory: 512Mi}, limits: {cpu: 500m, memory: 768Mi}}
+  redis:
+    image: redis:7.4.2
+    resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 1Gi}}
+    storage: 2Gi
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.22.0
+    resources: {requests: {cpu: 100m, memory: 512Mi}, limits: {cpu: "1", memory: 1Gi}}
+    storage: 5Gi
+  prefectServer:
+    image: prefecthq/prefect:3.4.25-python3.11
+    resources: {requests: {cpu: 200m, memory: 512Mi}, limits: {cpu: "1", memory: 1Gi}}
+    storage: 2Gi
+
+serving:
+  replicas: 2
+  resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 1Gi}}
+  hpa: {minReplicas: 2, maxReplicas: 4, targetCPUUtilizationPercentage: 70}
+  nodePort: 30001
+
+consumer:
+  resources: {requests: {cpu: 250m, memory: 512Mi}, limits: {cpu: "1", memory: 1Gi}}
+
+monitor:
+  resources: {requests: {cpu: 250m, memory: 768Mi}, limits: {cpu: "1", memory: 1536Mi}}
+
+orchestrator:
+  resources: {requests: {cpu: 100m, memory: 512Mi}, limits: {cpu: 500m, memory: 1Gi}}
+
+prefectWorker:
+  resources: {requests: {cpu: 500m, memory: 1536Mi}, limits: {cpu: "2", memory: 3Gi}}
+
+bootstrap:
+  enabled: true
+  # "dataset" reads the mounted raw data; "synthetic" for CI smoke runs
+  source: dataset
+  # parsing the raw CSVs on the first run needs several GB; later runs read the parquet cache
+  resources: {requests: {cpu: 500m, memory: 2Gi}, limits: {cpu: "2", memory: 6Gi}}
+
+producer:
+  # one Job per replay run; scripts/loadtest_k8s.py renders it with per-step arguments
+  enabled: false
+  args: ["--mode", "fixed_rate", "--rate", "250", "--duration-s", "300"]
+  resources: {requests: {cpu: 500m, memory: 2Gi}, limits: {cpu: "2", memory: 6Gi}}

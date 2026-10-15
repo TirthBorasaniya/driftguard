@@ -1,0 +1,18 @@
+# E3b Kubernetes autoscaling (SPEC 9, E3b). Runs on the kind cluster created by `make k8s-up`.
+version: 1
+dataset: cicids2017
+namespace: driftguard
+chart: deploy/k8s/charts/driftguard
+values: deploy/k8s/values-kind.yaml
+phases:
+  - {rate_eps: 250, duration_s: 300}
+  - {rate_eps: 2000, duration_s: 600}
+  - {rate_eps: 250, duration_s: 300}
+# keep sampling after the last phase to observe scale-in (KEDA cooldown and HPA stabilization)
+post_observe_s: 600
+sample_interval_s: 5
+lag_threshold: 5000
+prometheus_url: http://127.0.0.1:9090
+# the nightly CI job multiplies every duration by this factor
+reduced_duration_factor: 0.2
+figures_dir: results/figures

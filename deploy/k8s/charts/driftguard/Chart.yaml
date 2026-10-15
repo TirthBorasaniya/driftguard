@@ -1,0 +1,6 @@
+apiVersion: v2
+name: driftguard
+description: DriftGuard streaming intrusion detection with drift-gated retraining
+type: application
+version: 2.0.0
+appVersion: "2.0.0"

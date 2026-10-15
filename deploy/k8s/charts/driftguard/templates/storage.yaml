@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: driftguard-data
+  labels: {{- include "driftguard.labels" . | nindent 4 }}
+spec:
+  # single-node kind: pods on the one node share this ReadWriteOnce local-path volume
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.storage.className }}
+  resources:
+    requests:
+      storage: {{ .Values.storage.dataSize }}

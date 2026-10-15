@@ -1,0 +1,40 @@
+{{- range $c := list "serving" "consumer" "monitor" "orchestrator" }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: driftguard-{{ $c }}
+  labels:
+    release: {{ $.Values.prometheusRelease }}
+spec:
+  # job label equals the component name, matching the Compose scrape jobs and alert queries
+  jobLabel: app.kubernetes.io/component
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: {{ $c }}
+  endpoints:
+    - port: {{ if eq $c "serving" }}http{{ else }}metrics{{ end }}
+      path: /metrics
+      interval: 5s
+{{- end }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: driftguard-alerts
+  labels:
+    release: {{ .Values.prometheusRelease }}
+spec:
+{{ .Files.Get "files/alerts.yml" | indent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: driftguard-dashboards
+  labels:
+    grafana_dashboard: "1"
+data:
+{{- range $path, $_ := .Files.Glob "files/dashboards/*.json" }}
+  {{ base $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
