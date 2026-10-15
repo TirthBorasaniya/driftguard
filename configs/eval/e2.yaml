@@ -1,0 +1,34 @@
+# E2 drift detection benchmark (SPEC 9, E2). Offline: production detectors and policy code run on
+# windows of stationary base segments with one injected shift at a random, known onset.
+version: 1
+datasets: [cicids2017, kyoto]
+policy_config: configs/drift_policy.yaml
+model_config: configs/model.yaml
+# count windows for both datasets so onsets and delays are measured in identical units
+window_size: 5000
+n_windows: 40
+onset_window_range: [10, 30]
+miss_horizon_windows: 10
+n_seeds: 20
+chunk_size: 500
+label_coverages: [1.0, 0.3]
+label_delay: {min: 2000, max: 10000}
+# share of the shuffled base pool used to train the reference model; the rest feeds segments
+train_fraction: 0.3
+base:
+  cicids2017: {days: [monday, tuesday]}
+  kyoto: {years: [2006, 2007]}
+shifts:
+  covariate:
+    factors: [1.2, 1.5, 2.0]
+    noise_std: 0.1
+    features:
+      cicids2017: [flow_duration, flow_bytes_per_sec, fwd_packet_length_mean, flow_iat_mean, total_length_of_fwd_packet]
+      kyoto: [count, dst_host_count, dst_host_srv_count, same_srv_rate, src_bytes_bin]
+  prior:
+    attack_rate_after: [0.10, 0.20]
+  concept:
+    flip_fraction: 0.5
+    region_rule:
+      cicids2017: {feature: flow_duration, quantile: 0.5}
+      kyoto: {feature: dst_host_count, quantile: 0.5}

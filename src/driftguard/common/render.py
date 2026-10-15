@@ -140,9 +140,70 @@ def _headline_e1(doc: dict[str, Any]) -> str:
     )
 
 
+DETECTOR_ORDER = (
+    "psi_max",
+    "psi_share",
+    "drift_share",
+    "score_psi",
+    "kswin_score",
+    "adwin_error",
+    "policy",
+)
+
+
+def render_e2_drift_detection(doc: dict[str, Any]) -> str:
+    """Render E2: one table per dataset and label coverage, rows per shift and detector."""
+    parts = []
+    headers = [
+        "Shift",
+        "Detector",
+        "Median delay (windows)",
+        "IQR",
+        "Miss rate",
+        "False alarms / 100 windows",
+    ]
+    for dataset, block in doc["metrics"]["datasets"].items():
+        for coverage, shifts in block["results"].items():
+            rows = []
+            for shift, result in shifts.items():
+                for name in DETECTOR_ORDER:
+                    item = result["detectors"].get(name)
+                    if item is None:
+                        continue
+                    iqr = item["iqr_delay_windows"]
+                    rows.append(
+                        [
+                            shift,
+                            name,
+                            item["median_delay_windows"],
+                            f"{iqr[0]:g} to {iqr[1]:g}" if iqr else "n/a",
+                            item["miss_rate"],
+                            item["false_alarms_per_100_windows"],
+                        ]
+                    )
+            parts += [f"**{dataset}, {coverage}**", "", table(headers, rows, digits=2), ""]
+    return "\n".join(parts).rstrip()
+
+
+def _headline_e2(doc: dict[str, Any]) -> str:
+    items = []
+    for dataset, block in doc["metrics"]["datasets"].items():
+        full = block["results"].get("label_coverage=1.0", {})
+        cov = next((v for k, v in full.items() if k.startswith("covariate:factor=1.5")), None)
+        if cov:
+            policy = cov["detectors"]["policy"]
+            items.append(
+                f"{dataset}: policy median delay {fmt(policy['median_delay_windows'], 1)} "
+                f"windows, {fmt(policy['false_alarms_per_100_windows'], 2)} false alarms "
+                "per 100 windows (covariate x1.5)"
+            )
+    return "; ".join(items) or "see table"
+
+
 RENDERERS: dict[str, tuple[str, Renderer | None]] = {
     "v1_verified_run": ("make import-v1-results", render_v1_verified_run),
     "e1_model_quality": ("make eval-e1", render_e1_model_quality),
+    "e2_drift_detection": ("make benchmark-drift", render_e2_drift_detection),
 }
 
 # each headline row: (guarantee, results name, make target, extractor returning the value text)

@@ -83,3 +83,9 @@ test-integration:
 
 replay:
 	docker compose run --rm producer python -m driftguard.producer.replay $(ARGS)
+
+.PHONY: benchmark-drift
+
+benchmark-drift:
+	$(PY) scripts/benchmark_drift.py
+	$(PY) scripts/render_results.py

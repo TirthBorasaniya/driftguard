@@ -91,6 +91,7 @@ class MonitorCore:
         self._pending_predictions: OrderedDict[str, int] = OrderedDict()
         self._pending_labels: OrderedDict[str, int] = OrderedDict()
         self.decisions: list[PolicyDecision] = []
+        self.signal_log: list[tuple[str, dict[str, float]]] = []
         self._late_seen = 0
 
     # ----- inputs -----
@@ -108,6 +109,11 @@ class MonitorCore:
         self.windows.add_flows(
             [(int(r["event_time"]), [float(r[name]) for name in self.features]) for r in records]
         )
+        return self._close_windows()
+
+    def on_flow_vectors(self, times: list[int], vectors: list[list[float]]) -> list[dict[str, Any]]:
+        """Add flows as (event time, vector in `self.features` order) for offline benchmarks."""
+        self.windows.add_flows(list(zip(times, vectors, strict=True)))
         return self._close_windows()
 
     def on_predictions(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -194,6 +200,7 @@ class MonitorCore:
                     "data_quality_failed", window_id=window.window_id, failed=report.failed[:10]
                 )
         self._publish_gauges(signals)
+        self.signal_log.append((window.window_id, dict(signals)))
         decision = self.policy.evaluate(window.window_id, signals, gx_ok)
         self.decisions.append(decision)
         self._apply_pause(gx_ok)

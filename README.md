@@ -39,6 +39,17 @@ Friday, whose attack families never appear in training. Reproduce with `make eva
 Not yet run. Reproduce with `make eval-e1`.
 <!-- results:e1_model_quality:end -->
 
+### E2 Drift detection benchmark
+
+Shifts are injected into stationary base segments at a known onset; every detector and the
+combined policy are scored on detection delay, false alarms, and misses. ADWIN depends on
+delayed labels, so results are reported at label coverage 1.0 and 0.3. Reproduce with
+`make benchmark-drift`.
+
+<!-- results:e2_drift_detection:start -->
+Not yet run. Reproduce with `make benchmark-drift`.
+<!-- results:e2_drift_detection:end -->
+
 ### First version (historical, transcribed)
 
 <!-- results:v1_verified_run:start -->
