@@ -10,7 +10,10 @@ from sklearn.metrics import average_precision_score, precision_recall_curve, roc
 
 def precision_at_recall(y: np.ndarray, scores: np.ndarray, recall_level: float) -> float | None:
     """
-    Return the best precision achievable at recall >= `recall_level`.
+    Return the best precision achievable at recall >= `recall_level` (an oracle value).
+
+    The threshold is chosen using the same labels the precision is measured on, so this is an
+    upper bound on what a deployed threshold can reach, not an operating point.
 
     Returns
     -------
@@ -76,7 +79,8 @@ def evaluate_scores(
     -------
     metrics : dict
         `pr_auc`, `roc_auc`, `precision`, `recall`, `positive_rate`, `n`, `n_positive`,
-        `precision_at_recall_0_99`, and `per_family_recall` when families are given.
+        `oracle_precision_at_recall_0_99` (threshold chosen on these labels), and
+        `per_family_recall` when families are given.
     """
     y = np.asarray(y).astype(int)
     scores = np.asarray(scores, dtype=np.float64)
@@ -94,7 +98,7 @@ def evaluate_scores(
         "precision": tp / predicted_pos if predicted_pos else None,
         "recall": tp / n_pos if n_pos else None,
         "positive_rate": predicted_pos / len(y) if len(y) else None,
-        "precision_at_recall_0_99": precision_at_recall(y, scores, 0.99),
+        "oracle_precision_at_recall_0_99": precision_at_recall(y, scores, 0.99),
     }
     if families is not None:
         metrics["per_family_recall"] = per_family_recall(y, decisions, families)

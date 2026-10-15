@@ -99,3 +99,44 @@ def test_configured_model_is_not_saturated_on_stereotyped_attacks():
     scores = model.predict_proba(x[16_000:])[:, 1]
     threshold = select_threshold(y[16_000:], scores, 0.95)
     assert threshold_headroom(threshold) > MIN_THRESHOLD_HEADROOM
+
+
+def test_oracle_precision_is_labeled_and_bounds_a_validated_threshold():
+    """Regression (M9): the oracle column used to be presented as an operating point."""
+    rng = np.random.default_rng(0)
+    y = (rng.random(4000) < 0.2).astype(int)
+    scores = rng.normal(size=4000) + 1.5 * y
+    metrics = evaluate_scores(y, scores, threshold=3.0)  # a threshold that catches few attacks
+    assert "precision_at_recall_0_99" not in metrics
+    assert metrics["recall"] < 0.2 < 0.99
+    assert metrics["oracle_precision_at_recall_0_99"] is not None
+    validated = select_threshold(y, scores, 0.99)
+    at_validated = evaluate_scores(y, scores, validated)
+    assert at_validated["recall"] >= 0.99
+    assert at_validated["precision"] <= metrics["oracle_precision_at_recall_0_99"] + 1e-12
+
+
+def test_e1_protocol_reports_validation_chosen_recall_point(tmp_path):
+    import pandas as pd
+
+    from driftguard.benchmark.model_quality import run_protocol
+    from driftguard.common.config import load_config
+    from driftguard.data.registry import feature_names
+    from driftguard.data.synthetic import synthetic_flows
+
+    names = feature_names("cicids2017")[:6]
+    frame = synthetic_flows("cicids2017", 12_000, attack_rate=0.2, seed=2)
+    train, test = frame.iloc[:9000], frame.iloc[9000:]
+    model_config = load_config("configs/model.yaml")
+    params = {**model_config["lightgbm"], "n_jobs": 1, "n_estimators": 30}
+    config = type(model_config)(
+        model_config.path, model_config.sha256, {**model_config.data, "lightgbm": params}
+    )
+    result = run_protocol(
+        train, test, names, config, {"method": "blocked", "fraction": 0.1, "block_size": 500}, 0.95
+    )
+    point = result["test_at_validation_recall_0_99"]
+    assert set(point) == {"threshold", "precision", "recall"}
+    assert point["threshold"] <= result["threshold"]  # a higher recall target is never stricter
+    assert result["test"]["oracle_precision_at_recall_0_99"] is not None
+    assert isinstance(pd.Series([point["precision"]]).iloc[0], float | type(None))

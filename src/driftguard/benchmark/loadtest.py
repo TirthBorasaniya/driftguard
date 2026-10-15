@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from driftguard.common.logging import get_logger
+from driftguard.common.mlflow_client import MlflowRegistry
 from driftguard.common.settings import REPO_ROOT, get_settings
 
 # ============= Constants =============
@@ -93,6 +94,19 @@ class StepSamples:
     docker: list[dict] = field(default_factory=list)
 
 
+def step_quantile_query(q: float, metric: str, job: str, dataset: str, seconds: int) -> str:
+    """
+    PromQL for the true quantile of a latency histogram over a whole step.
+
+    The histogram buckets are summed over the step with `increase`, so the result is the quantile
+    of every observation in the step, not an average of per-window quantiles.
+    """
+    return (
+        f"histogram_quantile({q}, sum by (le) (increase({metric}_bucket"
+        f'{{job="{job}",dataset="{dataset}"}}[{int(seconds)}s])))'
+    )
+
+
 def latency_query(q: float, dataset: str) -> str:
     """PromQL for a scoring latency quantile from the serving router over 30 s."""
     return (
@@ -166,17 +180,39 @@ def run_step(
         "achieved_consumption_rate_eps": consumed / elapsed if elapsed else None,
         "lag": percentile_summary(samples.lag),
         "lag_series": samples.lag,
-        "latency_ms": {
-            "p50": float(np.median(samples.latency_p50)) if samples.latency_p50 else None,
-            "p95": float(np.median(samples.latency_p95)) if samples.latency_p95 else None,
-            "p99": float(np.median(samples.latency_p99)) if samples.latency_p99 else None,
-        },
+        "latency_ms": step_latency(settings.prometheus_url, dataset, elapsed, samples),
         "dlq_rate": dlq / consumed if consumed else None,
         "redis_peak_used_memory_bytes": max(samples.redis_used_memory, default=None),
         "per_service": per_service,
         "retraining_flow_run_id": retrain_run,
         "saturated": saturated(samples.lag, rate, float(config["saturation_backlog_s"])),
     }
+
+
+def step_latency(
+    prometheus_url: str, dataset: str, elapsed_s: float, samples: StepSamples
+) -> dict[str, float | None]:
+    """
+    Step-level latency quantiles in milliseconds.
+
+    `roundtrip_*` is measured by the consumer around each scoring request (HTTP, serialization,
+    inference); `model_*` is the serving router's inference time only. `worst_30s_model_p99` is
+    the largest windowed p99 seen during the step, which exposes the window containing a forced
+    retraining start.
+    """
+    seconds = int(elapsed_s) + 5
+    out: dict[str, float | None] = {}
+    for prefix, metric, job in (
+        ("roundtrip", "driftguard_scoring_roundtrip_seconds", "consumer"),
+        ("model", "driftguard_scoring_latency_seconds", "serving"),
+    ):
+        for q in (0.5, 0.95, 0.99):
+            value = prom_query(
+                prometheus_url, step_quantile_query(q, metric, job, dataset, seconds)
+            )
+            out[f"{prefix}_p{int(q * 100)}"] = None if value is None else value * 1000.0
+    out["worst_30s_model_p99"] = max(samples.latency_p99) if samples.latency_p99 else None
+    return out
 
 
 def produce_rate(frame, dataset: str, rate: float, duration_s: float) -> dict[str, Any]:
@@ -228,8 +264,8 @@ def produce_rate(frame, dataset: str, rate: float, duration_s: float) -> dict[st
 # ============= Experiment =============
 
 
-def reset_idempotency(redis_client, prefix: str = "dg:seen:") -> int:
-    """Delete idempotency keys so replayed slices are scored again (load tests only)."""
+def clear_prefix(redis_client, prefix: str) -> int:
+    """Delete every key under a prefix."""
     deleted, cursor = 0, 0
     while True:
         cursor, keys = redis_client.scan(cursor=cursor, match=f"{prefix}*", count=10_000)
@@ -237,6 +273,23 @@ def reset_idempotency(redis_client, prefix: str = "dg:seen:") -> int:
             deleted += redis_client.delete(*keys)
         if cursor == 0:
             return deleted
+
+
+def reset_step_state(redis_client, registry, dataset: str) -> None:
+    """
+    Return the stack to a clean, idle state before a load step.
+
+    A forced retraining registers a challenger and switches the router to shadow, which would add
+    shadow scoring load to every later step. This removes the challenger alias, restores
+    `champion_only`, and clears idempotency keys (so replayed slices are scored again) and
+    stream-feature window state.
+    """
+    from driftguard.common.mlflow_client import CHALLENGER, model_name
+
+    registry.delete_alias(model_name(dataset), CHALLENGER)
+    redis_client.set(f"dg:rollout:{dataset}", "champion_only")
+    clear_prefix(redis_client, "dg:seen:")
+    clear_prefix(redis_client, "dg:sf:")
 
 
 def restart_consumer(mode: str) -> None:
@@ -259,6 +312,7 @@ def run_e3(config: dict) -> dict[str, Any]:
     settings = get_settings()
     dataset = config["dataset"]
     redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
+    registry = MlflowRegistry(settings.mlflow_tracking_uri)
     frame = load_stream_frame(dataset)
     results: dict[str, Any] = {"partitions": config["partitions"], "runs": {}}
     for mode in config["stream_features_modes"]:
@@ -266,7 +320,7 @@ def run_e3(config: dict) -> dict[str, Any]:
         for condition in config["conditions"]:
             steps, offset = [], 0
             for rate in config["rates_eps"]:
-                reset_idempotency(redis_client)
+                reset_step_state(redis_client, registry, dataset)
                 n_rows = int(rate * float(config["step_duration_s"]) * 1.2)
                 if offset + n_rows > len(frame):
                     offset = 0

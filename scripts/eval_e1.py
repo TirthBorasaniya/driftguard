@@ -52,6 +52,9 @@ def main() -> None:
 
         stream_feature_fn = redis_replay_features
     metrics = run_e1(config, stream_feature_fn)
+    if args.o_skip_stream:
+        # the config hash covers the file, not this in-memory override, so record it explicitly
+        metrics["config_overrides"] = {"ablations.o_stream_features": False}
     print(f"Wrote {write_results('e1_model_quality', metrics, args.config, notes=notes)}")
 
 

@@ -129,9 +129,41 @@ def test_small_benchmark_detects_strong_covariate_shift():
     results = run_dataset(base, config, policy)["label_coverage=1.0"]
     psi = results["covariate:factor=3.0"]["detectors"]["psi_max"]
     assert psi["miss_rate"] == 0.0 and psi["median_delay_windows"] <= 1
+    gx = results["covariate:factor=3.0"]["gx"]
+    assert set(gx) == {
+        "failures_per_100_windows_before_onset",
+        "share_of_windows_blocked_after_onset",
+    }
+    assert gx["share_of_windows_blocked_after_onset"] > 0.5  # a x3 shift leaves the fitted bounds
+    # the clean-window failure rate is not asserted here: with bounds fitted on 3,600 rows and
+    # 300-row windows it is dominated by tail-estimation noise; the real E2 run reports it
+    assert gx["failures_per_100_windows_before_onset"] is not None
     assert set(results) == {
         "covariate:factor=3.0",
         "prior:attack_rate_after=0.5",
         "concept:flip_fraction=0.5",
     }
     assert isinstance(pd.Series([1]).sum(), np.integer)
+
+
+def test_summarize_gx_counts():
+    from driftguard.benchmark.drift_benchmark import summarize_gx
+
+    runs = [
+        {
+            "failures_before_onset": 1,
+            "windows_before_onset": 10,
+            "blocked_after_onset": 3,
+            "windows_after_onset": 6,
+        },
+        {
+            "failures_before_onset": 0,
+            "windows_before_onset": 10,
+            "blocked_after_onset": 0,
+            "windows_after_onset": 6,
+        },
+    ]
+    summary = summarize_gx(runs)
+    assert summary["failures_per_100_windows_before_onset"] == 5.0
+    assert summary["share_of_windows_blocked_after_onset"] == 0.25
+    assert summarize_gx([])["failures_per_100_windows_before_onset"] is None

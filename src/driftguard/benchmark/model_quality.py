@@ -149,6 +149,9 @@ def run_protocol(
     val_scores = predict_scores(model, model_matrix(val, features))
     threshold = select_threshold(val["label"].to_numpy(), val_scores, target_recall)
     test_scores = predict_scores(model, model_matrix(test, features))
+    # a deployable "recall 0.99" operating point: the threshold comes from the validation slice
+    threshold_99 = select_threshold(val["label"].to_numpy(), val_scores, 0.99)
+    at_validation_99 = evaluate_scores(test["label"].to_numpy(), test_scores, threshold_99)
     return {
         "n_features": len(features),
         "train_rows": len(fit),
@@ -159,6 +162,11 @@ def run_protocol(
         "scale_pos_weight": spw,
         "threshold": threshold,
         "validation": evaluate_scores(val["label"].to_numpy(), val_scores, threshold),
+        "test_at_validation_recall_0_99": {
+            "threshold": threshold_99,
+            "precision": at_validation_99["precision"],
+            "recall": at_validation_99["recall"],
+        },
         "test": evaluate_scores(
             test["label"].to_numpy(), test_scores, threshold, test["label_family"].to_numpy()
         ),
@@ -264,13 +272,18 @@ def run_e1(
 
 def trace_v1_figure(metrics: dict[str, Any]) -> dict[str, Any]:
     """
-    Report precision at recall 0.99 per protocol for comparison with the unexplained
-    "98% precision at 99% recall" figure (SPEC 9, E1).
+    Report, per protocol, the oracle precision at recall 0.99 and the precision and recall at the
+    validation-chosen recall-0.99 threshold, for comparison with the unverified "98% precision at
+    99% recall" figure (SPEC 9, E1). Only the validation-chosen numbers are deployable.
     """
     return {
-        name: result["test"].get("precision_at_recall_0_99")
+        name: {
+            "oracle_precision_at_recall_0_99": result["test"]["oracle_precision_at_recall_0_99"],
+            "validated_precision": result["test_at_validation_recall_0_99"]["precision"],
+            "validated_recall": result["test_at_validation_recall_0_99"]["recall"],
+        }
         for name, result in metrics["protocols"].items()
-    } | {"target_figure": {"precision": 0.98, "recall": 0.99}}
+    } | {"unverified_target_figure": {"precision": 0.98, "recall": 0.99}}
 
 
 def summarize_counts(frame: pd.DataFrame) -> dict[str, Any]:

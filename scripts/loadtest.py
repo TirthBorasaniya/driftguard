@@ -16,8 +16,10 @@ NOTES = (
     "Docker Compose on one host (see hardware), 6 partitions per flow topic, one consumer "
     "instance. Producer runs on the host at a fixed rate. Retraining condition submits a real "
     "Prefect retraining run in the middle of each step. Stream features off replaces behavioral "
-    "features with zeros to isolate their cost; idempotency keys are cleared between steps so "
-    "replayed slices are scored."
+    "features with zeros to isolate their cost. Rollout mode, challenger alias, idempotency "
+    "keys, and window state are reset before every step. Round-trip latency is measured by the "
+    "consumer around each scoring request; model latency is the serving router's inference time "
+    "only; both are quantiles over the whole step."
 )
 
 

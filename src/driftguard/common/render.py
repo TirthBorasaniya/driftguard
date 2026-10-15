@@ -81,7 +81,9 @@ def _protocol_row(label: str, result: dict[str, Any]) -> list[Any]:
         test["precision"],
         test["recall"],
         result["threshold"],
-        test["precision_at_recall_0_99"],
+        result["test_at_validation_recall_0_99"]["precision"],
+        result["test_at_validation_recall_0_99"]["recall"],
+        test["oracle_precision_at_recall_0_99"],
         test["n"],
     ]
 
@@ -96,7 +98,9 @@ def render_e1_model_quality(doc: dict[str, Any]) -> str:
         "Precision @ thr",
         "Recall @ thr",
         "Threshold",
-        "Precision @ recall 0.99",
+        "Precision @ val-chosen recall-0.99 thr",
+        "Recall @ val-chosen recall-0.99 thr",
+        "Oracle precision @ recall 0.99 (threshold chosen on test labels)",
         "Test rows",
     ]
     rows = [
@@ -240,9 +244,11 @@ def render_e3_load(doc: dict[str, Any]) -> str:
         "Consumed eps",
         "Lag max",
         "Lag p95",
-        "p50 ms",
-        "p95 ms",
-        "p99 ms",
+        "Round-trip p50 ms",
+        "Round-trip p95 ms",
+        "Round-trip p99 ms",
+        "Model p99 ms",
+        "Worst 30 s model p99 ms",
         "DLQ rate",
         "Redis peak MiB",
         "Saturated",
@@ -258,9 +264,11 @@ def render_e3_load(doc: dict[str, Any]) -> str:
                     step["achieved_consumption_rate_eps"],
                     step["lag"]["max"],
                     step["lag"]["p95"],
-                    step["latency_ms"]["p50"],
-                    step["latency_ms"]["p95"],
-                    step["latency_ms"]["p99"],
+                    step["latency_ms"]["roundtrip_p50"],
+                    step["latency_ms"]["roundtrip_p95"],
+                    step["latency_ms"]["roundtrip_p99"],
+                    step["latency_ms"]["model_p99"],
+                    step["latency_ms"]["worst_30s_model_p99"],
                     step["dlq_rate"],
                     redis_peak / 1024**2 if redis_peak else None,
                     step["saturated"],
@@ -285,7 +293,7 @@ def _headline_e3(doc: dict[str, Any]) -> str:
             top = sustained[-1]
             parts.append(
                 f"{name.split('/')[1]}: {fmt(top['achieved_consumption_rate_eps'], 0)} "
-                f"eps sustained, p99 {fmt(top['latency_ms']['p99'], 1)} ms"
+                f"eps sustained, round-trip p99 {fmt(top['latency_ms']['roundtrip_p99'], 1)} ms"
             )
     return "; ".join(parts) or "see table"
 

@@ -12,11 +12,12 @@ from driftguard.benchmark.injector import inject
 from driftguard.common.config import load_config
 from driftguard.common.logging import get_logger
 from driftguard.common.settings import REPO_ROOT
-from driftguard.data.registry import feature_names
+from driftguard.data.registry import dataset_config, feature_names
 from driftguard.monitor.main import MonitorCore
 from driftguard.monitor.policy import CHANGE_SIGNALS, THRESHOLD_SIGNALS
 from driftguard.monitor.reference import Reference, build_reference
 from driftguard.training.train import predict_scores, select_threshold, train_model
+from driftguard.training.validate import GXValidator, fit_bounds
 
 # ============= Constants =============
 
@@ -40,6 +41,7 @@ class BaseData:
     reference: Reference
     model: Any
     threshold: float
+    gx: Any = None
 
 
 def load_base_frame(dataset: str, base_cfg: dict) -> pd.DataFrame:
@@ -91,6 +93,14 @@ def prepare_base(
         int(policy_config["psi_bins"]),
         int(policy_config["evidently_max_rows"]),
     )
+    # the deployed monitor blocks windows that fail the GX suite, so E2's policy must too
+    gx_cfg = dataset_config(dataset)["gx"]
+    gx = GXValidator(
+        fit_bounds(reference_rows, features),
+        float(gx_cfg["mostly"]),
+        int(gx_cfg["min_window_rows"]),
+        name=f"{dataset}_e2",
+    )
     return BaseData(
         dataset,
         features,
@@ -100,6 +110,7 @@ def prepare_base(
         reference,
         model,
         threshold,
+        gx,
     )
 
 
@@ -136,7 +147,7 @@ def run_segment(
         base.dataset,
         policy_config,
         fakeredis.FakeRedis(decode_responses=True),
-        gx_validator=None,
+        gx_validator=base.gx,
         window_mode="count",
     )
     core.set_reference(base.reference, o_promotion=False)
@@ -223,6 +234,26 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def summarize_gx(runs: list[dict[str, int]]) -> dict[str, float | None]:
+    """
+    GX gate statistics for one shift: failures on clean windows and the share blocked after onset.
+
+    A window that fails the suite never emits a drift event, so a shift that pushes more than 1%
+    of a feature outside its fitted bounds is blocked as a data-quality failure; the combined
+    policy rows include that block.
+    """
+    before = sum(r["windows_before_onset"] for r in runs)
+    after = sum(r["windows_after_onset"] for r in runs)
+    return {
+        "failures_per_100_windows_before_onset": (
+            100.0 * sum(r["failures_before_onset"] for r in runs) / before if before else None
+        ),
+        "share_of_windows_blocked_after_onset": (
+            sum(r["blocked_after_onset"] for r in runs) / after if after else None
+        ),
+    }
+
+
 def shift_grid(config: dict, dataset: str) -> list[tuple[str, str, dict]]:
     """Every (shift type, magnitude label, params) combination for a dataset."""
     shifts = config["shifts"]
@@ -272,6 +303,7 @@ def run_dataset(base: BaseData, config: dict, policy_config: dict) -> dict[str, 
         results[cov_key] = {}
         for shift_type, magnitude, params in shift_grid(config, base.dataset):
             per_detector: dict[str, list[dict]] = {name: [] for name in (*DETECTORS, POLICY)}
+            gx_runs: list[dict[str, int]] = []
             manifests = []
             for seed in range(int(config["n_seeds"])):
                 rng = np.random.default_rng(
@@ -302,6 +334,17 @@ def run_dataset(base: BaseData, config: dict, policy_config: dict) -> dict[str, 
                 flags = window_flags(core, policy_config["thresholds"])
                 for name, sequence in flags.items():
                     per_detector[name].append(score_flags(sequence, onset // size, horizon))
+                gx_failed = [d.data_quality_failed for d in core.decisions]
+                onset_window = onset // size
+                before, after = gx_failed[:onset_window], gx_failed[onset_window:]
+                gx_runs.append(
+                    {
+                        "failures_before_onset": sum(before),
+                        "windows_before_onset": len(before),
+                        "blocked_after_onset": sum(after),
+                        "windows_after_onset": len(after),
+                    }
+                )
                 manifests.append(
                     {
                         "seed": seed,
@@ -320,6 +363,7 @@ def run_dataset(base: BaseData, config: dict, policy_config: dict) -> dict[str, 
                 )
             results[cov_key][f"{shift_type}:{magnitude}"] = {
                 "detectors": {name: summarize(runs) for name, runs in per_detector.items()},
+                "gx": summarize_gx(gx_runs),
                 "manifests": manifests,
             }
     return results

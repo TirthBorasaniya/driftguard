@@ -132,3 +132,71 @@ def test_compose_has_twelve_long_running_services_and_loopback_ports():
             assert str(port).startswith("127.0.0.1:")
         image = svc.get("image", "")
         assert not image.endswith(":latest") and (":" in image or "build" in svc)
+
+
+def test_step_quantile_query_covers_the_whole_step_not_a_window():
+    """Regression (M6): E3 used to report the median of per-30 s p99 samples."""
+    from driftguard.benchmark.loadtest import step_quantile_query
+
+    query = step_quantile_query(
+        0.99, "driftguard_scoring_roundtrip_seconds", "consumer", "cicids2017", 305
+    )
+    assert "increase(driftguard_scoring_roundtrip_seconds_bucket" in query
+    assert "[305s]" in query and 'job="consumer"' in query and "histogram_quantile(0.99" in query
+
+
+def test_reset_step_state_returns_the_stack_to_idle():
+    """Regression (M7): a forced retraining left shadow mode and a challenger for later steps."""
+    import fakeredis
+
+    from driftguard.benchmark.loadtest import reset_step_state
+    from driftguard.common.mlflow_client import CHALLENGER, CHAMPION, model_name
+
+    from .fakes import FakeRegistry
+
+    registry = FakeRegistry()
+    registry.register("cicids2017", {}, {"threshold": 0.5})
+    registry.register("cicids2017", {}, {"threshold": 0.5})
+    name = model_name("cicids2017")
+    registry.set_alias(name, CHAMPION, "1")
+    registry.set_alias(name, CHALLENGER, "2")
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    redis.set("dg:rollout:cicids2017", "shadow")
+    for key in ("dg:seen:a", "dg:seen:b", "dg:sf:z:src:x", "dg:sf:agg:y", "dg:retrain:paused:x"):
+        redis.set(key, "1")
+    reset_step_state(redis, registry, "cicids2017")
+    assert registry.get_alias(name, CHALLENGER) is None
+    assert registry.get_alias(name, CHAMPION).version == "1"
+    assert redis.get("dg:rollout:cicids2017") == "champion_only"
+    assert sorted(redis.keys("*")) == ["dg:retrain:paused:x", "dg:rollout:cicids2017"]
+
+
+def test_e3_renderer_uses_step_level_latency_fields():
+    from driftguard.common.render import render_e3_load
+
+    latency = {
+        "roundtrip_p50": 1.0,
+        "roundtrip_p95": 2.0,
+        "roundtrip_p99": 3.0,
+        "model_p50": 0.5,
+        "model_p95": 0.7,
+        "model_p99": 0.9,
+        "worst_30s_model_p99": 1.4,
+    }
+    step = {
+        "target_rate_eps": 100,
+        "achieved_consumption_rate_eps": 99.0,
+        "lag": {"max": 5.0, "p95": 4.0},
+        "latency_ms": latency,
+        "dlq_rate": 0.0,
+        "redis_peak_used_memory_bytes": 2 * 1024**2,
+        "saturated": False,
+    }
+    doc = {
+        "metrics": {
+            "partitions": 6,
+            "runs": {"stream_features=on/idle": {"steps": [step], "saturation_rate_eps": None}},
+        }
+    }
+    text = render_e3_load(doc)
+    assert "Round-trip p99 ms" in text and "Worst 30 s model p99 ms" in text and "1.4" in text
