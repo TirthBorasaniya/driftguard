@@ -66,17 +66,16 @@ def test_late_events_counted_but_still_update_state():
     assert comp.compute([flow(2, 99)])[0]["src_conn_count_10s"] == 2  # (89, 99] holds t=90, 99
 
 
-def test_hll_unique_counts_merge_last_six_buckets():
+def test_hll_unique_counts_merge_last_six_buckets_per_event():
     comp, _ = computer()
     batch = [flow(i, i * 10, port=1000 + i, dst=f"10.1.0.{i}") for i in range(8)]  # 0..70 s
     out = comp.compute(batch)
-    # newest bucket is 7 (70 s); buckets 2..7 hold ports 1002..1007
-    assert out[-1]["src_unique_dst_ports_60s"] == 6
-    assert out[-1]["src_unique_dst_hosts_60s"] == 6
-    assert out[0]["src_unique_dst_ports_60s"] == out[-1]["src_unique_dst_ports_60s"]  # per batch
+    # an event sees only its own bucket and the five before it: event k has min(k + 1, 6) uniques
+    assert [r["src_unique_dst_ports_60s"] for r in out] == [1, 2, 3, 4, 5, 6, 6, 6]
+    assert [r["src_unique_dst_hosts_60s"] for r in out] == [1, 2, 3, 4, 5, 6, 6, 6]
 
 
-def test_mean_bytes_and_syn_share():
+def test_mean_bytes_and_syn_share_include_only_events_up_to_the_current_one():
     comp, _ = computer()
     out = comp.compute(
         [
@@ -85,10 +84,38 @@ def test_mean_bytes_and_syn_share():
             flow(2, 3, src="10.9.9.9", fwd=50, syn=2),
         ]
     )
-    assert out[0]["src_mean_fwd_bytes_60s"] == pytest.approx(200.0)
-    assert out[0]["src_syn_flow_share_60s"] == pytest.approx(0.5)
+    assert out[0]["src_mean_fwd_bytes_60s"] == pytest.approx(100.0)
+    assert out[0]["src_syn_flow_share_60s"] == pytest.approx(1.0)
+    assert out[1]["src_mean_fwd_bytes_60s"] == pytest.approx(200.0)
+    assert out[1]["src_syn_flow_share_60s"] == pytest.approx(0.5)
     assert out[2]["src_mean_fwd_bytes_60s"] == pytest.approx(50.0)
     assert list(out[0]) == list(BEHAVIOR_FEATURES)
+
+
+def test_long_batch_matches_one_event_per_batch():
+    """Regression (H1): pruning by the newest event of a batch used to erase earlier events."""
+    events = [
+        flow(i, i, port=2000 + i % 9, dst=f"10.2.0.{i % 5}", fwd=10.0 + i, syn=i % 2)
+        for i in range(120)
+    ]  # 120 s in one batch
+    one_batch, _ = computer()
+    reference, _ = computer()
+    expected = [reference.compute([event])[0] for event in events]
+    got = one_batch.compute(events)
+    assert got == expected
+    assert got[0]["src_conn_count_10s"] == 1 and got[0]["src_conn_count_60s"] == 1
+    assert got[0]["dst_conn_count_10s"] == 1
+
+
+@pytest.mark.parametrize("batch_size", [1, 7, 37, 500])
+def test_features_do_not_depend_on_batch_boundaries(batch_size):
+    """Regression (M12): the same stream gave different features for different poll splits."""
+    frame = synthetic_flows("cicids2017", 1500, seed=9, step_ms=400)
+    frame["src_ip"] = [f"10.0.0.{i % 6}" for i in range(len(frame))]
+    frame["dst_ip"] = [f"10.1.0.{i % 11}" for i in range(len(frame))]
+    expected = replay_features(frame, computer()[0], 1)
+    got = replay_features(frame, computer()[0], batch_size)
+    pd.testing.assert_frame_equal(got[list(BEHAVIOR_FEATURES)], expected[list(BEHAVIOR_FEATURES)])
 
 
 def test_ttls_bound_every_key():

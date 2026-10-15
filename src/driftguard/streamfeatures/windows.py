@@ -32,10 +32,9 @@ class StreamFeatureComputer:
     forward-byte sum, flow count, and SYN-flow count per bucket. Per destination key: a sorted set
     (10 s count). Every key expires after twice its window.
 
-    Counts use `ZCOUNT (t - w, t]`, so they include the current event and exclude events with a
-    later event time that were processed earlier. Unique counts, mean bytes, and SYN share are
-    computed once per source key per batch over the six buckets ending at that key's newest
-    bucket in the batch. All writes run in one pipeline and all reads in a second one.
+    Features are computed per event, in event-time order, in a single pipeline per batch (write
+    the event, read its features), so they include the current event, exclude later events, and
+    do not depend on batch boundaries.
 
     Parameters
     ----------
@@ -81,6 +80,15 @@ class StreamFeatureComputer:
         """
         Update window state with a batch and return each record's features, in input order.
 
+        Events are processed in event-time order. For each event the computer writes its state
+        and then reads its features inside one pipeline, so a read sees exactly the events at or
+        before that event in processing order and nothing later. Pruning happens once per key
+        after all reads. The result therefore does not depend on how the stream was split into
+        batches, and no event sees the future of its own batch.
+
+        Windows are `ZCOUNT (t - w, t]` for connection counts and the (up to) six 10 s buckets
+        ending at the event's own bucket for unique counts, mean forward bytes, and SYN share.
+
         Parameters
         ----------
         records : list of dict
@@ -90,21 +98,17 @@ class StreamFeatureComputer:
         Returns
         -------
         features : list of dict
-            One dict per record with the keys of BEHAVIOR_FEATURES.
+            One dict per record, in input order, with the keys of BEHAVIOR_FEATURES.
         """
         if not records:
             return []
         prepared = []
-        late = 0
-        for record in records:
-            t = int(record["event_time"])
-            if self.watermark_ms is not None and t < self.watermark_ms - self.lateness_ms:
-                late += 1
-            self.watermark_ms = t if self.watermark_ms is None else max(self.watermark_ms, t)
+        for position, record in enumerate(records):
             prepared.append(
                 (
-                    record["event_id"],
-                    t,
+                    int(record["event_time"]),
+                    str(record["event_id"]),
+                    position,
                     self.keyer.key(str(record["src_ip"])),
                     self.keyer.key(str(record["dst_ip"])),
                     int(record[self.port_field]),
@@ -112,78 +116,84 @@ class StreamFeatureComputer:
                     int(float(record[self.syn_field]) > 0),
                 )
             )
-        if late:
-            # late events still update state; they are only counted
-            self.late_events += late
-            LATE_EVENTS.labels(dataset=self.dataset).inc(late)
+        prepared.sort(key=lambda item: (item[0], item[1]))
+        self._count_late([item[0] for item in prepared])
 
-        write = self.redis.pipeline(transaction=False)
-        for event_id, t, src, dst, port, fwd_bytes, syn in prepared:
+        pipe = self.redis.pipeline(transaction=False)
+        n_commands = 0
+        read_start: dict[int, int] = {}
+        touched_z_src: set[str] = set()
+        touched_z_dst: set[str] = set()
+        touched_other: set[str] = set()
+        for t, event_id, position, src, dst, port, fwd_bytes, syn in prepared:
             b = bucket_of(t, self.bucket_s)
             z_src, z_dst = self._z("src", src), self._z("dst", dst)
-            write.zadd(z_src, {event_id: t})
-            write.zremrangebyscore(z_src, "-inf", t - self.long_ms - self.lateness_ms)
-            write.expire(z_src, self.ttl_long)
-            write.zadd(z_dst, {event_id: t})
-            write.zremrangebyscore(z_dst, "-inf", t - self.short_ms - self.lateness_ms)
-            write.expire(z_dst, self.ttl_short)
-            for kind, member in (("ports", str(port)), ("hosts", dst)):
-                key = hll_key(self.prefix, kind, src, b)
-                write.pfadd(key, member)
-                write.expire(key, self.ttl_long)
+            ports_key = hll_key(self.prefix, "ports", src, b)
+            hosts_key = hll_key(self.prefix, "hosts", src, b)
             agg = self._agg(src, b)
-            write.hincrbyfloat(agg, "fwd_bytes", fwd_bytes)
-            write.hincrby(agg, "n", 1)
-            write.hincrby(agg, "syn", syn)
-            write.expire(agg, self.ttl_long)
-        write.execute()
+            pipe.zadd(z_src, {event_id: t})
+            pipe.zadd(z_dst, {event_id: t})
+            pipe.pfadd(ports_key, str(port))
+            pipe.pfadd(hosts_key, dst)
+            pipe.hincrbyfloat(agg, "fwd_bytes", fwd_bytes)
+            pipe.hincrby(agg, "n", 1)
+            pipe.hincrby(agg, "syn", syn)
+            n_commands += 7
+            touched_z_src.add(z_src)
+            touched_z_dst.add(z_dst)
+            touched_other.update((ports_key, hosts_key, agg))
 
-        newest_bucket: dict[str, int] = {}
-        for _, t, src, *_ in prepared:
-            newest_bucket[src] = max(newest_bucket.get(src, -1), bucket_of(t, self.bucket_s))
-        read = self.redis.pipeline(transaction=False)
-        for _, t, src, dst, *_ in prepared:
-            read.zcount(self._z("src", src), f"({t - self.short_ms}", t)
-            read.zcount(self._z("src", src), f"({t - self.long_ms}", t)
-            read.zcount(self._z("dst", dst), f"({t - self.short_ms}", t)
-        sources = sorted(newest_bucket)
-        for src in sources:
-            buckets = bucket_range(newest_bucket[src], self.n_buckets)
-            merged_count(read, [hll_key(self.prefix, "ports", src, b) for b in buckets])
-            merged_count(read, [hll_key(self.prefix, "hosts", src, b) for b in buckets])
-            for b in buckets:
-                read.hmget(self._agg(src, b), "fwd_bytes", "n", "syn")
-        results = read.execute()
+            read_start[position] = n_commands
+            buckets = bucket_range(b, self.n_buckets)
+            pipe.zcount(z_src, f"({t - self.short_ms}", t)
+            pipe.zcount(z_src, f"({t - self.long_ms}", t)
+            pipe.zcount(z_dst, f"({t - self.short_ms}", t)
+            merged_count(pipe, [hll_key(self.prefix, "ports", src, k) for k in buckets])
+            merged_count(pipe, [hll_key(self.prefix, "hosts", src, k) for k in buckets])
+            for k in buckets:
+                pipe.hmget(self._agg(src, k), "fwd_bytes", "n", "syn")
+            n_commands += 5 + len(buckets)
 
-        per_event = 3
-        per_source = 2 + self.n_buckets
-        offset = per_event * len(prepared)
-        source_features = {}
-        for i, src in enumerate(sources):
-            block = results[offset + i * per_source : offset + (i + 1) * per_source]
+        newest = prepared[-1][0]
+        for key in touched_z_src:
+            pipe.zremrangebyscore(key, "-inf", newest - self.long_ms - self.lateness_ms)
+            pipe.expire(key, self.ttl_long)
+        for key in touched_z_dst:
+            pipe.zremrangebyscore(key, "-inf", newest - self.short_ms - self.lateness_ms)
+            pipe.expire(key, self.ttl_short)
+        for key in touched_other:
+            pipe.expire(key, self.ttl_long)
+        results = pipe.execute()
+
+        features: list[dict[str, float]] = [{} for _ in records]
+        for position, start in read_start.items():
+            block = results[start : start + 5 + self.n_buckets]
             total_bytes = total_n = total_syn = 0.0
-            for fwd_bytes, n, syn in block[2:]:
+            for fwd_bytes, n, syn in block[5:]:
                 total_bytes += float(fwd_bytes or 0.0)
                 total_n += float(n or 0.0)
                 total_syn += float(syn or 0.0)
-            source_features[src] = {
-                "src_unique_dst_ports_60s": float(block[0]),
-                "src_unique_dst_hosts_60s": float(block[1]),
+            features[position] = {
+                "src_conn_count_10s": float(block[0]),
+                "src_conn_count_60s": float(block[1]),
+                "dst_conn_count_10s": float(block[2]),
+                "src_unique_dst_ports_60s": float(block[3]),
+                "src_unique_dst_hosts_60s": float(block[4]),
                 "src_mean_fwd_bytes_60s": total_bytes / total_n if total_n else 0.0,
                 "src_syn_flow_share_60s": total_syn / total_n if total_n else 0.0,
             }
-        features = []
-        for j, (_, _, src, *_rest) in enumerate(prepared):
-            counts = results[per_event * j : per_event * (j + 1)]
-            features.append(
-                {
-                    "src_conn_count_10s": float(counts[0]),
-                    "src_conn_count_60s": float(counts[1]),
-                    "dst_conn_count_10s": float(counts[2]),
-                    **source_features[src],
-                }
-            )
         return features
+
+    def _count_late(self, times: list[int]) -> None:
+        """Count events more than the allowed lateness behind the watermark; they still count."""
+        late = 0
+        for t in times:
+            if self.watermark_ms is not None and t < self.watermark_ms - self.lateness_ms:
+                late += 1
+            self.watermark_ms = t if self.watermark_ms is None else max(self.watermark_ms, t)
+        if late:
+            self.late_events += late
+            LATE_EVENTS.labels(dataset=self.dataset).inc(late)
 
 
 def build_stream_feature_fn(dataset: str, redis_client, settings):

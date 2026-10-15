@@ -60,9 +60,8 @@ def redis_replay_features(frame: pd.DataFrame) -> pd.DataFrame:
     """
     Replay against Redis under a private key prefix, then delete that state.
 
-    Uses the same computer and batch size as the consumer. Values match the served ones up to the
-    composition of poll batches (unique counts and means are computed per batch); training on the
-    offline store uses the exact served values.
+    Uses the same computer as the consumer. Features do not depend on batch boundaries, so the
+    replayed values equal the served ones for an in-order stream.
     """
     from redis import Redis
 

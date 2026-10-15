@@ -73,19 +73,19 @@ Decision: count windows close when both streams have filled the same index range
 Alternatives: join flows and predictions by event id (rejected: needs unbounded state for the join).
 Consequences: a stalled stream stalls window closing.
 
-## D-011: Per-batch stream feature computation
-Status: accepted (2026-10-14)
-Context: merging HyperLogLogs for every event caps throughput near 2,000 events/s.
-Decision: counts use `ZCOUNT (t-w, t]` per event; unique counts, mean bytes, and SYN share are computed once per source key per poll batch over the six buckets ending at that key's newest bucket; all writes and reads run in two pipelines per batch.
-Alternatives: per-event merges (rejected: throughput), approximate counts without HyperLogLog (rejected: memory grows with the window).
-Consequences: unique counts depend on batch composition, so replay features match served values up to that composition; training reads the exact served values from the offline store.
+## D-011: Per-event stream feature computation in event-time order
+Status: accepted (2026-10-14), revised (2026-10-15) after review
+Context: the first implementation computed unique counts, mean bytes, and SYN share once per source per poll batch, and pruned all window state by the newest event of the batch before any read. Review reproduced two defects: early events in a long batch got undercounts (even 0 for their own flow; 57% of 500-event batches in the CICIDS2017 stream span more than 15 s), and unique counts changed for 85 to 98% of rows when the poll size changed from 500 to 37.
+Decision: process each batch in event-time order and, for each event, write its state and then read its features inside one pipeline; prune once per key after all reads. Counts use `ZCOUNT (t - w, t]`; unique counts, mean bytes, and SYN share use the up to six 10 s buckets ending at the event's own bucket.
+Alternatives: batch-level reads (rejected: depends on Kafka poll boundaries and looks ahead, contradicting the determinism guarantee), a separate offline reimplementation (rejected: two implementations can disagree).
+Consequences: about 18 Redis commands per event instead of a few per batch, so the throughput cost of stream features (E3 features on and off) is higher than the specification's note about per-batch merges anticipated; features are identical for any batch split of an in-order stream.
 
 ## D-012: E1 behavioral-feature ablation by replay
 Status: accepted (2026-10-14)
 Context: the ablation needs behavioral features for every flow of the week.
 Decision: replay the dataset through the same computer against Redis under a private key prefix, with the consumer's batch size, then delete that state.
 Alternatives: a separate offline implementation (rejected: two implementations can disagree).
-Consequences: E1 with the ablation needs Redis and the IP salt.
+Consequences: E1 with the ablation needs Redis and the IP salt; replayed values equal served values for an in-order stream because features do not depend on batch boundaries (D-011).
 
 ## D-013: E2 runs offline
 Status: accepted (2026-10-14)
