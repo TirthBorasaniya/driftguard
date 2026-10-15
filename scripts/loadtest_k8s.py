@@ -31,10 +31,11 @@ def main() -> None:
         dest="o_reduced",
         help="scale durations down for the nightly CI job",
     )
+    parser.add_argument("--source", choices=["dataset", "synthetic"], default="dataset")
     args = parser.parse_args()
     configure_logging("loadtest-k8s")
     config = load_config(args.config).data
-    metrics = run_e3b(config, args.o_reduced)
+    metrics = run_e3b(config, args.o_reduced, args.source)
     figure = replica_timeline(
         metrics["samples"], REPO_ROOT / config["figures_dir"] / "e3b_replicas.png"
     )

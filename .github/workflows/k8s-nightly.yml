@@ -1,0 +1,53 @@
+name: k8s-nightly
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * *"
+
+jobs:
+  kind-autoscaling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ADMIN_TOKEN: ci-admin-token
+      IP_HASH_SALT: ci-salt
+      GF_ADMIN_PASSWORD: ci-grafana
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.13.0"
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+          version: v0.25.0
+      - name: Install dependencies and tools
+        run: |
+          uv sync --frozen --python 3.11
+          mkdir -p .cache/bin .kube
+          curl -sSfL https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz | tar xz --strip-components=1 -C .cache/bin linux-amd64/helm
+          echo "$PWD/.cache/bin" >> "$GITHUB_PATH"
+      - name: Write .env and CI-only synthetic GX bounds
+        run: |
+          sed -e "s/^ADMIN_TOKEN=.*/ADMIN_TOKEN=${ADMIN_TOKEN}/" \
+              -e "s/^IP_HASH_SALT=.*/IP_HASH_SALT=${IP_HASH_SALT}/" \
+              -e "s/^GF_ADMIN_PASSWORD=.*/GF_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD}/" \
+              .env.example > .env
+          uv run python scripts/fit_gx_bounds_synthetic.py --if-missing
+      - name: Create the cluster with synthetic bootstrap data
+        run: |
+          sed -i 's/source: dataset/source: synthetic/' deploy/k8s/values-kind.yaml
+          ./scripts/k8s_up.sh
+      - name: Reduced autoscaling run (synthetic flows)
+        run: uv run python scripts/loadtest_k8s.py --o-reduced --source synthetic
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e3b-reduced
+          path: |
+            results/e3b_k8s_autoscaling_reduced.json
+            results/figures/e3b_replicas.png
+      - name: Tear down
+        if: always()
+        run: ./scripts/k8s_down.sh

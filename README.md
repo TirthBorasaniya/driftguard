@@ -63,6 +63,10 @@ Not yet run. Reproduce with `make loadtest`.
 
 ### E3b Kubernetes autoscaling
 
+The kind stack (Strimzi, KEDA, kube-prometheus-stack, MLflow, Prefect, and the application pods)
+needs about 12 GB of free RAM. `make k8s-up` refuses to start while the Compose stack or another
+kind cluster is running.
+
 On a local kind cluster, the load holds at 250 events/s, steps to 2,000 events/s, and drops
 back; KEDA scales the consumers on lag. Reproduce with `make k8s-up && make loadtest-k8s`.
 

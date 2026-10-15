@@ -146,8 +146,19 @@ def analyze(samples: list[dict], phases: list[dict], threshold: float) -> dict[s
 # ============= Experiment =============
 
 
-def run_e3b(config: dict, o_reduced: bool = False) -> dict[str, Any]:
-    """Drive the phases with producer Jobs while sampling replicas and lag."""
+def run_e3b(config: dict, o_reduced: bool = False, source: str = "dataset") -> dict[str, Any]:
+    """
+    Drive the phases with producer Jobs while sampling replicas and lag.
+
+    Parameters
+    ----------
+    config : dict
+        `configs/eval/e3b.yaml` content.
+    o_reduced : bool
+        Scale durations down (nightly CI).
+    source : str
+        `dataset` replays the real flows; `synthetic` generates flows (CI without the dataset).
+    """
     factor = float(config["reduced_duration_factor"]) if o_reduced else 1.0
     phases = [
         {"rate_eps": p["rate_eps"], "duration_s": p["duration_s"] * factor}
@@ -172,6 +183,10 @@ def run_e3b(config: dict, o_reduced: bool = False) -> dict[str, Any]:
     sampler = threading.Thread(target=sample, daemon=True)
     sampler.start()
     slices, offset, run_tag = [], 0, int(time.time())
+    total = sum(int(p["rate_eps"] * p["duration_s"]) for p in phases)
+    synthetic_args = (
+        ["--source", "synthetic", "--n-events", str(total)] if source == "synthetic" else []
+    )
     for i, phase in enumerate(phases):
         count = int(phase["rate_eps"] * phase["duration_s"])
         slices.append((offset, count))
@@ -191,6 +206,7 @@ def run_e3b(config: dict, o_reduced: bool = False) -> dict[str, Any]:
                 str(count),
                 "--duration-s",
                 str(phase["duration_s"]),
+                *synthetic_args,
             ],
             timeout_s=phase["duration_s"] + 600,
         )
@@ -202,7 +218,16 @@ def run_e3b(config: dict, o_reduced: bool = False) -> dict[str, Any]:
         config,
         f"e3b-check-{run_tag}",
         ["python", "-m", "driftguard.benchmark.k8s_check"],
-        ["--dataset", dataset, "--slices", ",".join(f"{s}:{c}" for s, c in slices)],
+        [
+            "--dataset",
+            dataset,
+            "--slices",
+            ",".join(f"{s}:{c}" for s, c in slices),
+            "--source",
+            source,
+            "--n-events",
+            str(total),
+        ],
         timeout_s=3600,
     )
     check = next(
@@ -213,6 +238,7 @@ def run_e3b(config: dict, o_reduced: bool = False) -> dict[str, Any]:
     return {
         "phases": phases,
         "reduced": o_reduced,
+        "source": source,
         "scaling": analyze(samples, phases, float(config["lag_threshold"])),
         "duplicate_and_loss_check": check,
         "samples": samples,

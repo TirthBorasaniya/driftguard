@@ -14,9 +14,15 @@ from driftguard.data.serde import TopicSerde, registry_client
 # ============= Check =============
 
 
-def expected_ids(dataset: str, slices: list[tuple[int, int]]) -> set[str]:
+def expected_ids(
+    dataset: str,
+    slices: list[tuple[int, int]],
+    source: str = "dataset",
+    n_events: int | None = None,
+) -> set[str]:
     """Event ids the producer jobs emitted, from the same dataset slices they replayed."""
-    frame = load_stream_frame(dataset)
+    producer_config = {"synthetic": {"n_events": n_events}, "seed": 42} if n_events else None
+    frame = load_stream_frame(dataset, source, producer_config)
     ids: set[str] = set()
     for start, count in slices:
         ids.update(frame["event_id"].iloc[start : start + count].astype(str))
@@ -55,11 +61,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default="cicids2017")
     parser.add_argument("--slices", required=True, help="start:count,start:count,...")
+    parser.add_argument("--source", choices=["dataset", "synthetic"], default="dataset")
+    parser.add_argument("--n-events", type=int, help="synthetic stream size")
     parser.add_argument("--idle-s", type=float, default=60)
     parser.add_argument("--timeout-s", type=float, default=1800)
     args = parser.parse_args()
     slices = [tuple(int(x) for x in part.split(":")) for part in args.slices.split(",")]
-    ids = expected_ids(args.dataset, slices)
+    ids = expected_ids(args.dataset, slices, args.source, args.n_events)
     total, distinct = count_predictions(ids, args.idle_s, args.timeout_s)
     print(
         json.dumps(
