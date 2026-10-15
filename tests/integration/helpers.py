@@ -1,14 +1,12 @@
 """Helpers for tests that run against the Docker Compose stack (never run in unit CI)."""
 
-import re
 import subprocess
 import time
 import uuid
 from collections.abc import Callable
 
-import httpx
-
 from driftguard.common.kafka import consumer_config, producer_config
+from driftguard.common.metrics import scrape_metric
 from driftguard.common.settings import get_settings
 from driftguard.data.registry import feature_names
 from driftguard.data.schemas import topic_name
@@ -19,7 +17,6 @@ from driftguard.producer.replay import run_replay
 # ============= Constants =============
 
 DATASET = "cicids2017"
-METRIC_LINE = re.compile(r"^(?P<name>[a-z_]+)(\{(?P<labels>[^}]*)\})? (?P<value>[0-9.eE+-]+)$")
 
 
 # ============= Stack =============
@@ -42,15 +39,7 @@ def wait_for(predicate: Callable[[], bool], timeout_s: float, interval_s: float 
 
 def metric_value(url: str, name: str, **labels: str) -> float:
     """Sum a Prometheus metric from a `/metrics` endpoint, filtered by labels."""
-    total = 0.0
-    for line in httpx.get(url, timeout=5).text.splitlines():
-        match = METRIC_LINE.match(line)
-        if not match or match.group("name") != name:
-            continue
-        found = dict(re.findall(r'(\w+)="([^"]*)"', match.group("labels") or ""))
-        if all(found.get(k) == v for k, v in labels.items()):
-            total += float(match.group("value"))
-    return total
+    return scrape_metric(url, name, **labels)
 
 
 # ============= Producing and collecting =============

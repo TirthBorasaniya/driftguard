@@ -1,0 +1,10 @@
+# ONNX Runtime versus native LightGBM inference latency (evidence map: ONNX latency reduction).
+version: 1
+dataset: cicids2017
+model_config: configs/model.yaml
+train_days: [monday, tuesday]
+batch_sizes: [1, 8, 32, 128, 256, 512, 1024]
+warmup_iterations: 200
+timed_iterations: 500
+input_seed: 42
+onnx_threads: 1

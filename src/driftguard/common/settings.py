@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     )
     metrics_port: int = Field(default=9101, alias="METRICS_PORT")
     instance_id: str = Field(default="", alias="INSTANCE_ID")
+    # load tests only: "off" replaces stream features with zeros to measure their throughput cost
+    stream_features_mode: str = Field(default="on", alias="STREAM_FEATURES_MODE")
 
     def config_path(self, *parts: str) -> Path:
         """Return a path under the configuration directory."""

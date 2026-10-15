@@ -231,15 +231,101 @@ def _headline_e5(doc: dict[str, Any]) -> str:
     return f"{decisions} (all as expected: {fmt(doc['metrics']['all_match_expected'])})"
 
 
+def render_e3_load(doc: dict[str, Any]) -> str:
+    """Render E3: one row per run and rate step."""
+    m = doc["metrics"]
+    headers = [
+        "Run",
+        "Target eps",
+        "Consumed eps",
+        "Lag max",
+        "Lag p95",
+        "p50 ms",
+        "p95 ms",
+        "p99 ms",
+        "DLQ rate",
+        "Redis peak MiB",
+        "Saturated",
+    ]
+    rows = []
+    for run, block in m["runs"].items():
+        for step in block["steps"]:
+            redis_peak = step["redis_peak_used_memory_bytes"]
+            rows.append(
+                [
+                    run,
+                    step["target_rate_eps"],
+                    step["achieved_consumption_rate_eps"],
+                    step["lag"]["max"],
+                    step["lag"]["p95"],
+                    step["latency_ms"]["p50"],
+                    step["latency_ms"]["p95"],
+                    step["latency_ms"]["p99"],
+                    step["dlq_rate"],
+                    redis_peak / 1024**2 if redis_peak else None,
+                    step["saturated"],
+                ]
+            )
+    saturation = "; ".join(
+        f"{run}: {fmt(block['saturation_rate_eps'])}" for run, block in m["runs"].items()
+    )
+    return (
+        f"{m['partitions']} partitions per topic. Saturation point (first rate whose lag "
+        f"grows for the whole step): {saturation}.\n\n" + table(headers, rows, digits=1)
+    )
+
+
+def _headline_e3(doc: dict[str, Any]) -> str:
+    runs = doc["metrics"]["runs"]
+    parts = []
+    for name in ("stream_features=on/idle", "stream_features=on/retraining"):
+        steps = runs.get(name, {}).get("steps", [])
+        sustained = [s for s in steps if not s["saturated"]]
+        if sustained:
+            top = sustained[-1]
+            parts.append(
+                f"{name.split('/')[1]}: {fmt(top['achieved_consumption_rate_eps'], 0)} "
+                f"eps sustained, p99 {fmt(top['latency_ms']['p99'], 1)} ms"
+            )
+    return "; ".join(parts) or "see table"
+
+
+def render_onnx_latency(doc: dict[str, Any]) -> str:
+    """Render the ONNX Runtime versus native LightGBM latency table."""
+    rows = [
+        [
+            r["batch_size"],
+            r["native"]["p50_ms"],
+            r["onnx"]["p50_ms"],
+            r["native"]["p95_ms"],
+            r["onnx"]["p95_ms"],
+            r["speedup_p50"],
+        ]
+        for r in doc["metrics"]["rows"]
+    ]
+    return table(
+        ["Batch", "Native p50 ms", "ONNX p50 ms", "Native p95 ms", "ONNX p95 ms", "Speedup (p50)"],
+        rows,
+    )
+
+
 RENDERERS: dict[str, tuple[str, Renderer | None]] = {
     "v1_verified_run": ("make import-v1-results", render_v1_verified_run),
     "e1_model_quality": ("make eval-e1", render_e1_model_quality),
     "e2_drift_detection": ("make benchmark-drift", render_e2_drift_detection),
     "e5_gate": ("make eval-e5", render_e5_gate),
+    "e3_load": ("make loadtest", render_e3_load),
+    "onnx_latency": ("make benchmark-onnx", render_onnx_latency),
 }
 
 # each headline row: (guarantee, results name, make target, extractor returning the value text)
 HEADLINE_ROWS: list[tuple[str, str, str, Callable[[dict[str, Any]], str]]] = [
+    (
+        "Sustained ingestion and p99 latency, with and without retraining",
+        "e3_load",
+        "make loadtest",
+        _headline_e3,
+    ),
     (
         "Precision and recall at target recall, time-ordered",
         "e1_model_quality",

@@ -102,3 +102,23 @@ rollback:
 
 test-e2e:
 	$(UV) run pytest -m e2e tests/e2e
+
+.PHONY: loadtest benchmark-onnx dashboards dashboards-check benchmark eval
+
+loadtest:
+	$(PY) scripts/loadtest.py
+	$(PY) scripts/render_results.py
+
+benchmark-onnx:
+	$(PY) scripts/benchmark_onnx.py
+	$(PY) scripts/render_results.py
+
+dashboards:
+	$(PY) scripts/build_dashboards.py
+
+dashboards-check:
+	$(PY) scripts/build_dashboards.py --check
+
+benchmark: benchmark-drift benchmark-onnx
+
+eval: eval-e1 eval-e5

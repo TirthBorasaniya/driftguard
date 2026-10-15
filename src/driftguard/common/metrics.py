@@ -1,5 +1,6 @@
 """Prometheus metric definitions (SPEC 8) and a minimal metrics and health HTTP server."""
 
+import re
 import threading
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -183,3 +184,39 @@ def start_metrics_server(
     thread = threading.Thread(target=server.serve_forever, name="metrics-server", daemon=True)
     thread.start()
     return server
+
+
+# ============= Scraping =============
+
+METRIC_LINE = re.compile(r"^(?P<name>[a-z_:]+)(\{(?P<labels>[^}]*)\})? (?P<value>[0-9.eE+-]+|NaN)$")
+
+
+def scrape_metric(url: str, name: str, **labels: str) -> float:
+    """
+    Sum one metric from a `/metrics` endpoint, filtered by label values.
+
+    Parameters
+    ----------
+    url : str
+        Metrics endpoint.
+    name : str
+        Sample name (for counters include `_total`).
+    labels : dict
+        Required label values.
+
+    Returns
+    -------
+    total : float
+        Sum over matching samples; 0.0 when none match.
+    """
+    import httpx
+
+    total = 0.0
+    for line in httpx.get(url, timeout=5).text.splitlines():
+        match = METRIC_LINE.match(line)
+        if not match or match.group("name") != name or match.group("value") == "NaN":
+            continue
+        found = dict(re.findall(r'(\w+)="([^"]*)"', match.group("labels") or ""))
+        if all(found.get(k) == v for k, v in labels.items()):
+            total += float(match.group("value"))
+    return total

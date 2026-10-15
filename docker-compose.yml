@@ -168,6 +168,7 @@ services:
       <<: *app-env
       SERVICE_NAME: consumer
       METRICS_PORT: 9101
+      STREAM_FEATURES_MODE: ${STREAM_FEATURES_MODE:-on}
     ports:
       - "127.0.0.1:9101:9101"
     depends_on:

@@ -15,6 +15,7 @@ run" has no measured value yet.
 <!-- results:headline:start -->
 | Guarantee | Measured result | Evidence |
 |---|---|---|
+| Sustained ingestion and p99 latency, with and without retraining | not yet run (`make loadtest`) | `results/e3_load.json` |
 | Precision and recall at target recall, time-ordered | not yet run (`make eval-e1`) | `results/e1_model_quality.json` |
 <!-- results:headline:end -->
 
@@ -49,6 +50,22 @@ delayed labels, so results are reported at label coverage 1.0 and 0.3. Reproduce
 <!-- results:e2_drift_detection:start -->
 Not yet run. Reproduce with `make benchmark-drift`.
 <!-- results:e2_drift_detection:end -->
+
+### E3 System load
+
+Fixed-rate steps from 100 to 2,000 events per second, five minutes each, with the orchestrator
+idle and with a retraining run forced mid-step, and with stream features on and off. Reproduce
+with `make up && make bootstrap && make loadtest`.
+
+<!-- results:e3_load:start -->
+Not yet run. Reproduce with `make loadtest`.
+<!-- results:e3_load:end -->
+
+### ONNX Runtime latency
+
+<!-- results:onnx_latency:start -->
+Not yet run. Reproduce with `make benchmark-onnx`.
+<!-- results:onnx_latency:end -->
 
 ### E5 Promotion gate correctness
 

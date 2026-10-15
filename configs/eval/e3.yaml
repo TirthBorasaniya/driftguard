@@ -1,0 +1,16 @@
+# E3 system load (SPEC 9, E3). Runs against the Compose stack started with `make up`.
+version: 1
+dataset: cicids2017
+rates_eps: [100, 250, 500, 1000, 2000]
+step_duration_s: 300
+conditions: [idle, retraining]
+stream_features_modes: ["on", "off"]
+# a retraining run is submitted this many seconds into each step of the retraining condition
+retrain_at_s: 150
+sample_interval_s: 5
+docker_stats_interval_s: 15
+# a step is saturated when lag rises across the whole step and ends above this many seconds of input
+saturation_backlog_s: 5
+settle_s: 30
+consumer_metrics_url: http://localhost:9101/metrics
+partitions: 6

@@ -360,7 +360,12 @@ class ConsumerService:
 
         if not stream_features_enabled(self.dataset):
             return None
-        from driftguard.streamfeatures.windows import build_stream_feature_fn
+        from driftguard.streamfeatures.windows import BEHAVIOR_FEATURES, build_stream_feature_fn
+
+        if self.settings.stream_features_mode == "off":
+            # load-test mode: identical request shape, no Redis window work (E3 features off)
+            logger.warning("stream_features_disabled_for_load_test")
+            return lambda records: [dict.fromkeys(BEHAVIOR_FEATURES, 0.0) for _ in records]
 
         return build_stream_feature_fn(self.dataset, self.redis, self.settings)
 
