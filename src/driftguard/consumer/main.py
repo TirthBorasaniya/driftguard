@@ -107,6 +107,7 @@ class BatchProcessor:
         stream_features: StreamFeatureFn | None = None,
         batch_size: int = 256,
         wait_poll_s: float = 0.5,
+        behavior_sink=None,
     ):
         self.dataset = dataset
         self.deserialize = deserialize
@@ -118,6 +119,7 @@ class BatchProcessor:
         self.emit_prediction = emit_prediction
         self.flush = flush
         self.stream_features = stream_features
+        self.behavior_sink = behavior_sink
         self.batch_size = batch_size
         self.wait_poll_s = wait_poll_s
         self.features = feature_names(dataset)
@@ -202,10 +204,13 @@ class BatchProcessor:
                 time.perf_counter() - sf_start
             )
         frame = feature_frame(records, self.features)
-        if extra is not None:
-            for name in extra[0] if extra else []:
-                frame[name] = [float(row[name]) for row in extra]
         self.sink.write(frame)
+        if extra and self.behavior_sink is not None:
+            behavior = frame[["event_id", "event_timestamp"]].copy()
+            for name in extra[0]:
+                behavior[name] = [float(row[name]) for row in extra]
+            behavior[list(extra[0])] = behavior[list(extra[0])].astype("float32")
+            self.behavior_sink.write(behavior)
 
         vectors = self._vectors(records, extra)
         names = self.features + (list(extra[0].keys()) if extra else [])
@@ -300,7 +305,8 @@ class ConsumerService:
             if cfg["offline_sink"]["enabled"]
             else None
         )
-        online_write = self._feast_writer() if cfg["feast"]["online_write"] else None
+        self.store = self._feast_store() if cfg["feast"]["online_write"] else None
+        online_write = self.store.write_to_online_store if self.store is not None else None
         scoring = cfg["scoring"]
         self.processor = BatchProcessor(
             dataset=dataset,
@@ -325,6 +331,7 @@ class ConsumerService:
             stream_features=self._stream_features(),
             batch_size=scoring["batch_size"],
             wait_poll_s=idem["wait_poll_s"],
+            behavior_sink=self._behavior_sink(offline),
         )
         self.label_sink = None
         if cfg["label_sink"]["enabled"] and offline is not None:
@@ -345,15 +352,24 @@ class ConsumerService:
         self._running = True
         self._assigned: list = []
 
-    def _feast_writer(self):
+    def _feast_store(self):
         from driftguard.features.store import build_store, redis_online_store
 
-        store = build_store(
+        return build_store(
             self.settings.feast_repo_path,
             self.settings.data_dir / "feast" / "registry.db",
             redis_online_store(self.settings.redis_url),
         )
-        return store.write_to_online_store
+
+    def _behavior_sink(self, offline):
+        from driftguard.data.registry import stream_features_enabled
+
+        if not stream_features_enabled(self.dataset):
+            return None
+        from driftguard.streamfeatures.push import BehaviorSink, feast_online_pusher
+
+        pusher = feast_online_pusher(self.store) if self.store is not None else None
+        return BehaviorSink(self.dataset, offline, pusher)
 
     def _stream_features(self) -> StreamFeatureFn | None:
         from driftguard.data.registry import stream_features_enabled

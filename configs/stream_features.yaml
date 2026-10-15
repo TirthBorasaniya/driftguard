@@ -1,0 +1,18 @@
+# Stream-computed behavioral features (SPEC 4.3).
+version: 1
+key_prefix: "dg:sf:"
+short_window_s: 10
+long_window_s: 60
+bucket_s: 10
+allowed_lateness_s: 5
+# every Redis key expires after ttl_factor times its window
+ttl_factor: 2
+source_fields:
+  dst_port: dst_port
+  fwd_bytes: total_length_of_fwd_packet
+  syn_count: syn_flag_count
+# offline rows go to date-partitioned parquet registered as the PushSource batch source; the file
+# offline store rewrites a single file per push and rejects directories (measured, see DECISIONS)
+offline_write: partitioned_parquet
+# replaying a dataset for training or E1 uses the consumer's poll batch size
+replay_batch_size: 500

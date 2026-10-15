@@ -22,5 +22,5 @@ ablations:
   o_drop_dst_port: true
   attempted_policies: [benign, attack, drop]
   # CICFlowMeter only versus CICFlowMeter plus stream-computed behavioral features (needs Redis)
-  o_stream_features: false
+  o_stream_features: true
 o_run_from_scratch: false
