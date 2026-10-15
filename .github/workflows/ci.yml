@@ -1,31 +1,24 @@
-name: CI
+name: ci
 
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
-  lint-and-test:
+  lint-and-unit:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
+          version: "0.13.0"
+      - name: Install Python 3.11 and dependencies
+        run: uv sync --frozen --python 3.11
       - name: Ruff lint
-        run: ruff check src/ tests/
-
-      - name: Mypy type check
-        run: mypy src/ --ignore-missing-imports
-
-      - name: Pytest (no data required)
-        run: pytest tests/ -m "not requires_data" -v
+        run: uv run ruff check .
+      - name: Ruff format
+        run: uv run ruff format --check .
+      - name: Unit tests
+        run: uv run pytest
+      - name: README tables match results
+        run: uv run python scripts/render_results.py --check

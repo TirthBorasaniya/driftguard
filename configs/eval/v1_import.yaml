@@ -1,0 +1,45 @@
+# Transcription record for the first version's verified numbers (SPEC P1).
+# These values were measured in earlier sessions and reported in the private
+# IMPLEMENTATION_REPORT.md; they were not re-measured by this repository's v2 code.
+# scripts/import_v1_results.py copies them into results/v1_verified_run.json with provenance.
+version: 1
+source_document: "IMPLEMENTATION_REPORT.md (private, not committed), final verification run"
+source_commit: "d0f531e"
+split: >-
+  Chronological 75/15/10 percentile split over the five concatenated original CICIDS2017
+  TrafficLabelling days (Monday to Friday): train rows 0 to P75, test P75 to P90, stream P90 to end.
+  Not the SPEC E1 protocol (Monday to Wednesday train, Thursday and Friday test).
+items:
+  - claim: "Flows processed by the replay (original CICIDS2017, 5 days)"
+    value: 863882
+    source: "Producer log, final verification run (commit d0f531e)"
+  - claim: "Invalid rows dropped (negative CICFlowMeter values)"
+    value: 3
+    source: "Preprocessing log, final verification run (commit d0f531e)"
+  - claim: "scale_pos_weight computed from training labels"
+    value: 30.912
+    source: "Training log, final verification run (commit d0f531e)"
+  - claim: "Test PR-AUC (chronological 75/15/10 split)"
+    value: 0.1625
+    source: "Training log, final verification run (commit d0f531e)"
+  - claim: "Test ROC-AUC (chronological 75/15/10 split)"
+    value: 0.9383
+    source: "Training log, final verification run (commit d0f531e)"
+  - claim: "Precision at recall-calibrated threshold 0.0298"
+    value: 0.1719
+    source: "Training log, final verification run (commit d0f531e)"
+  - claim: "Recall at recall-calibrated threshold 0.0298 (target 0.95)"
+    value: 0.9555
+    source: "Training log, final verification run (commit d0f531e)"
+  - claim: "PSI trigger window and max PSI"
+    value: "window_0501, max PSI 0.2606"
+    source: "Consumer log, final verification run (commit d0f531e)"
+  - claim: "Retraining flows started / reached model comparison / aborted at validation"
+    value: "535 / 534 / 0"
+    source: "Prefect logs, final verification run (commit d0f531e)"
+  - claim: "Promotions in the live run"
+    value: 0
+    source: "Final verification run; deterministic retraining on identical data"
+  - claim: "Consumer throughput with synchronous retraining (msg/s)"
+    value: "about 250 before, about 64 with retraining completing"
+    source: "Final verification run (commit d0f531e)"

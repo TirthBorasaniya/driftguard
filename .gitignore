@@ -125,3 +125,12 @@ IMPLEMENTATION_REPORT.md
 /mlruns/
 /recordings/
 *.log
+
+# Local planning and assistant files (never committed)
+.planning/
+CLAUDE.md
+.claude/
+/reports/
+/notebooks/
+AUDIT_REPORT.md
+predictions.db*

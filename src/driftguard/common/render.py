@@ -1,0 +1,127 @@
+"""Render README tables from results/*.json between `<!-- results:<name>:start/end -->` markers."""
+
+import re
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from driftguard.common.results import load_results
+
+# ============= Constants =============
+
+MARKER_PATTERN = re.compile(
+    r"(<!-- results:(?P<name>[a-z0-9_]+):start -->)(?P<body>.*?)(<!-- results:(?P=name):end -->)",
+    re.DOTALL,
+)
+
+Renderer = Callable[[dict[str, Any]], str]
+
+
+# ============= Formatting helpers =============
+
+
+def fmt(value: Any, digits: int = 4) -> str:
+    """Format a number for a markdown table; None renders as `n/a`."""
+    if value is None:
+        return "n/a"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, int):
+        return f"{value:,}"
+    if isinstance(value, float):
+        return f"{value:.{digits}f}"
+    return str(value)
+
+
+def table(headers: list[str], rows: list[list[Any]], digits: int = 4) -> str:
+    """Build a GitHub-flavored markdown table."""
+    lines = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
+    lines += ["| " + " | ".join(fmt(cell, digits) for cell in row) + " |" for row in rows]
+    return "\n".join(lines)
+
+
+def provenance(doc: dict[str, Any]) -> str:
+    """One-line provenance footer for a rendered table."""
+    return (
+        f"_Source: `results/{doc['run_id'].split('_', 1)[1]}.json`, run `{doc['run_id']}`, "
+        f"git `{doc['git_sha']}`, hardware: {doc['environment'].get('hardware', 'n/a')}._"
+    )
+
+
+# ============= Renderers =============
+
+
+def render_v1_verified_run(doc: dict[str, Any]) -> str:
+    """Render the transcribed first-version numbers with their provenance."""
+    metrics = doc["metrics"]
+    rows = [[item["claim"], item["value"], item["source"]] for item in metrics["items"]]
+    return "\n".join(
+        [
+            table(["Claim (v1, historical)", "Value", "Source"], rows),
+            "",
+            f"_Transcribed, not re-measured: {doc['notes']}_",
+        ]
+    )
+
+
+RENDERERS: dict[str, tuple[str, Renderer | None]] = {
+    "v1_verified_run": ("make import-v1-results", render_v1_verified_run),
+}
+
+# each headline row: (guarantee, results name, make target, extractor returning the value text)
+HEADLINE_ROWS: list[tuple[str, str, str, Callable[[dict[str, Any]], str]]] = []
+
+
+def render_headline(results_dir: Path) -> str:
+    """Render the headline table, one row per SPEC guarantee with its evidence file."""
+    rows = []
+    for claim, name, make_target, extractor in HEADLINE_ROWS:
+        doc = load_results(name, results_dir)
+        value = extractor(doc) if doc is not None else f"not yet run (`{make_target}`)"
+        rows.append([claim, value, f"`results/{name}.json`"])
+    if not rows:
+        return "No experiments registered."
+    return table(["Guarantee", "Measured result", "Evidence"], rows)
+
+
+def register(name: str, make_target: str, renderer: Renderer) -> None:
+    """Register a renderer for a results name."""
+    RENDERERS[name] = (make_target, renderer)
+
+
+# ============= Rewriting =============
+
+
+def render_block(name: str, results_dir: Path) -> str:
+    """
+    Render the markdown body for one marker.
+
+    Parameters
+    ----------
+    name : str
+        Results name.
+    results_dir : Path
+        Directory with results JSON files.
+
+    Returns
+    -------
+    body : str
+        Markdown placed between the markers.
+    """
+    make_target, renderer = RENDERERS.get(name, (f"make results ({name})", None))
+    if name == "headline":
+        return render_headline(results_dir)
+    doc = load_results(name, results_dir)
+    if doc is None or renderer is None:
+        return f"Not yet run. Reproduce with `{make_target}`."
+    return renderer(doc) + "\n\n" + provenance(doc)
+
+
+def render_readme(readme_text: str, results_dir: Path) -> str:
+    """Return README text with every results marker block re-rendered."""
+
+    def _sub(match: re.Match) -> str:
+        body = render_block(match.group("name"), results_dir)
+        return f"{match.group(1)}\n{body}\n{match.group(4)}"
+
+    return MARKER_PATTERN.sub(_sub, readme_text)
