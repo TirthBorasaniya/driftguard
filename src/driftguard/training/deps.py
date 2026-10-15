@@ -8,7 +8,7 @@ from driftguard.common.settings import Settings
 from driftguard.data.registry import dataset_config, feature_names, stream_features_enabled
 from driftguard.features.offline import OfflineStore
 from driftguard.training.flow import RetrainDeps
-from driftguard.training.validate import GXValidator, load_bounds
+from driftguard.training.validate import GXValidator, load_bounds, physical_bounds
 from driftguard.training.window import build_training_window
 
 # ============= Constants =============
@@ -90,8 +90,15 @@ def build_retrain_deps(dataset: str, settings: Settings) -> RetrainDeps:
     historical = feast_historical(settings)
     refs = feature_refs(dataset)
     gx_cfg = dataset_config(dataset)["gx"]
+    # `percentile_bounds` is SPEC 6.2 (bounds fitted once on the initial data); `physical_bounds`
+    # validates only data quality and lets drifted windows through (DECISIONS D-022)
+    bounds = (
+        physical_bounds(dataset)
+        if gx_cfg["training_bounds"] == "physical_bounds"
+        else load_bounds(settings.config_path("data", f"{dataset}_gx_bounds.json"))
+    )
     validator = GXValidator(
-        load_bounds(settings.config_path("data", f"{dataset}_gx_bounds.json")),
+        bounds,
         float(gx_cfg["mostly"]),
         int(gx_cfg["min_training_rows"]),
         name=f"{dataset}_training",

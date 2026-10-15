@@ -35,7 +35,12 @@ monitor_windows: month
 stream_features:
   enabled: false
 gx:
+  # training validation (SPEC 6.2): fitted percentile bounds and the share that must lie inside
   mostly: 0.99
+  # percentile_bounds (SPEC 6.2) or physical_bounds; see DECISIONS D-022 before changing
+  training_bounds: percentile_bounds
+  # monitor window suite: data quality only (physical limits, finite, non-null); no row may violate
+  monitor_mostly: 1.0
   min_window_rows: 100
   min_training_rows: 10000
   reference_years: [2006, 2007]

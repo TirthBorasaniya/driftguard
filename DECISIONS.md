@@ -64,7 +64,7 @@ Status: accepted (2026-10-14)
 Context: bounds that move to make a run pass defeat the check.
 Decision: `scripts/fit_gx_bounds.py` fits per-feature bounds at the 0.1 and 99.9 percentiles of the initial reference data once, writes them to `configs/data/<dataset>_gx_bounds.json`, and refuses to overwrite without `--o-force`; at least 99% of rows must lie within bounds. Bounds are never loosened.
 Alternatives: refit on every window (rejected: hides drift), hard min and max (rejected: one outlier fails everything).
-Consequences: the bounds file is committed after the first real fit; CI uses synthetic bounds that are never committed.
+Consequences: the bounds file is committed after the first real fit; CI uses synthetic bounds that are never committed. The monitor does not use these bounds (D-022); only the training flow does.
 
 ## D-010: Monitor windows over two streams
 Status: accepted (2026-10-14)
@@ -116,13 +116,6 @@ Result: blocked validation is the methodologically safer split but did not chang
 Alternatives: random slice (rejected: leaks neighbors), newest slice (rejected: 11 positives).
 Consequences: validation contains only attack families seen in training, so recall on unseen families at the stored threshold can be low; E1 reports it per family.
 
-## D-019: Model capacity chosen so the threshold keeps headroom below 1.0
-Status: accepted (2026-10-15)
-Context: with 400 trees, seen attackers score within about 3e-6 of 1.0, so the threshold that reaches recall 0.95 sits in a saturated tail. A seen family (SSH-Patator) with median 1 minus score of 5e-6 fell just past it and had recall 0.000, while a 100-tree model recovered it. The stored threshold was brittle to score shifts far smaller than any real drift. This was found by inspecting E1 output, which included test-day per-family recall, so the investigation saw test data.
-Decision: choose `n_estimators` by a criterion fixed before the final choice and evaluated on validation only: the largest of {50, 100, 150, 200, 300, 400} (learning rate 0.05) whose blocked-validation threshold has at least 1e-3 of headroom below 1.0. That is 100 (headroom 5.5e-3; 150 trees gives 4.9e-4). Training also records `threshold_headroom` and logs a warning below 1e-3.
-Alternatives: keep 400 trees and report the brittle operating point (rejected: the per-family recall would reflect float saturation, not the model), calibrate scores after training (rejected: adds a stage with no spec support), choose the count from test-day recall (rejected: tuning on the evaluation).
-Consequences: validation ranking is unchanged (PR-AUC about 1.0); the contamination caveat above is disclosed in the README limitations.
-
 ## D-017: Load-test switch for stream features
 Status: accepted (2026-10-14)
 Context: E3 must report the throughput cost of stream features.
@@ -137,6 +130,13 @@ Decision: CI validates the chart with `helm lint`, `helm template`, and kubeconf
 Alternatives: no manifest validation outside a cluster (rejected: errors would surface only at install time).
 Consequences: kubeconform downloads CRD schemas at CI time.
 
+## D-019: Model capacity chosen so the threshold keeps headroom below 1.0
+Status: accepted (2026-10-15)
+Context: with 400 trees, seen attackers score within about 3e-6 of 1.0, so the threshold that reaches recall 0.95 sits in a saturated tail. A seen family (SSH-Patator) with median 1 minus score of 5e-6 fell just past it and had recall 0.000, while a 100-tree model recovered it. The stored threshold was brittle to score shifts far smaller than any real drift. This was found by inspecting E1 output, which included test-day per-family recall, so the investigation saw test data.
+Decision: choose `n_estimators` by a criterion fixed before the final choice and evaluated on validation only: the largest of {50, 100, 150, 200, 300, 400} (learning rate 0.05) whose blocked-validation threshold has at least 1e-3 of headroom below 1.0. That is 100 (headroom 5.5e-3; 150 trees gives 4.9e-4). Training also records `threshold_headroom` and logs a warning below 1e-3.
+Alternatives: keep 400 trees and report the brittle operating point (rejected: the per-family recall would reflect float saturation, not the model), calibrate scores after training (rejected: adds a stage with no spec support), choose the count from test-day recall (rejected: tuning on the evaluation).
+Consequences: validation ranking is unchanged (PR-AUC about 1.0); the contamination caveat above is disclosed in the README limitations.
+
 ## D-020: KSWIN on a subsampled score stream (policy version 4)
 Status: accepted (2026-10-15)
 Context: the first E2 smoke run (2 seeds, 24 windows) showed `kswin_score` flagging 68 to 92 of every 100 stationary windows and the combined policy raising 15 to 26 false alarms per 100 windows, about one spurious retraining trigger every four to five windows. Cause: KSWIN runs a KS test per update, so a 5,000-event window holds thousands of overlapping tests at alpha 0.005; on stationary continuous scores it fired about 4 times per 5,000 events in 40 of 40 windows. A window-level count threshold cannot fix this: KSWIN resets after each detection, and its count under a persistent strong shift (about 6 per 5,000 events) was no larger than under the null (about 4).
@@ -144,9 +144,17 @@ Decision: keep the specified parameters (alpha 0.005, window 500, statistic 100)
 Alternatives: a calibrated detection-count limit (rejected: no power, see above), feeding window means (rejected: needs hundreds of windows of history), dropping KSWIN (rejected: the specification requires it).
 Consequences: KSWIN needs about 50,000 events before its first test; the strided stream spans more event time than the specification's wording implies. E2 reports the resulting rates.
 
-## D-021: E2 applies the same GX gate as the deployed monitor
-Status: accepted (2026-10-15)
-Context: the deployed monitor blocks any window that fails the Great Expectations suite and pauses retraining, but E2 originally ran the policy with no suite, so its combined-policy delay and miss rate described a system that does not exist. A covariate shift large enough to push more than 1% of a feature outside its fitted 0.1 and 99.9 percentile bounds is classified as a data-quality failure, not drift.
-Decision: E2 builds a GX validator per dataset from bounds fitted on the reference rows (the same fit as `scripts/fit_gx_bounds.py`, `mostly` and the minimum rows from the dataset config) and runs the policy with it. Each shift also reports the clean-window failure rate (failures per 100 windows before onset) and the share of windows blocked after onset, next to the policy rows.
-Alternatives: restrict GX to schema and null checks and let range violations feed drift signals (rejected: changes the deployed behavior the specification describes), leave E2 without GX (rejected: misreports the system).
-Consequences: E2 takes longer (about 0.5 s per window for the suite); a strong shift can be reported as blocked rather than detected, which is the behavior of the real system.
+## D-021: E2 applies the same GX suite as the deployed monitor
+Status: accepted (2026-10-15), see D-022 for the suite
+Context: the deployed monitor blocks any window that fails its Great Expectations suite and pauses retraining, but E2 originally ran the policy with no suite, so its combined-policy delay and miss rate described a system that does not exist.
+Decision: E2 builds the monitor's validator for each dataset (D-022) and runs the policy with it. Each shift reports the clean-window failure rate (failures per 100 windows before onset) and the share of windows blocked after onset next to the policy rows.
+Alternatives: leave E2 without GX (rejected: misreports the system).
+Consequences: E2 takes longer (about 0.5 s per window for the suite).
+
+## D-022: The monitor's GX suite checks data quality, not distribution
+Status: accepted for the monitor (2026-10-15); the training-flow check is OPEN and needs a decision
+Context: the first design used one validator with bounds fitted once at the 0.1 and 99.9 percentiles of the reference (tolerating 1% of values outside) in both the monitor and the training flow. The reduced E2 run blocked 100% of post-onset windows for every covariate shift on both datasets, even at factor 1.2, so the combined policy detected none of them although PSI alone caught each within one window. That contradicts SPEC 10 (an injected covariate shift must produce a drift event within 5 windows). Measured on real CICIDS2017 with bounds fitted on Monday and Tuesday: the newest 60,000 flows of Wednesday pass, but windows from Thursday and Friday, the days with new attack families, fail (2 to 10 of 83 features outside tolerance). Percentile bounds cannot tell broken data from drifted data.
+Decision for the monitor: the suite checks only data quality: every feature finite, non-null, and within the physical limits in the dataset config (ports up to 65535, non-negative durations and counts), with no tolerated violations (`gx.monitor_mostly: 1.0`) and a minimum row count. On real windows 0 of 80 failed (both datasets); windows with a negative, null, or infinite value fail. The specification defines no bounds for the monitor's suite, so this does not loosen a specified bound.
+Open decision for the training flow: SPEC 6.2 prescribes bounds fitted once at the 0.1 and 99.9 percentiles and never loosened. With them, the retraining flow ends as `rejected_data_quality` on drifted windows such as the Thursday and Friday ones above, so the system would not adapt to the very drift it exists for. The default stays at the specification (`gx.training_bounds: percentile_bounds`); `physical_bounds` is available as a one-line switch. Choosing between them changes a stated rule, so it is escalated rather than made here.
+Alternatives: loosen `gx.mostly` until real drift passes (rejected: arbitrary, and it weakens the check), apply physical bounds in training by default (deferred to the decision above).
+Consequences: until the training decision is made, E4's CICIDS2017 adaptive run is expected to record rejected retraining runs after the first novel attack day; that outcome is itself reportable.

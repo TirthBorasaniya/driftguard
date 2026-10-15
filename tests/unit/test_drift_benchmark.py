@@ -115,7 +115,7 @@ def test_small_benchmark_detects_strong_covariate_shift():
             "covariate": {
                 "factors": [3.0],
                 "noise_std": 0.0,
-                "features": {"cicids2017": ["flow_duration", "protocol"]},
+                "features": {"cicids2017": ["flow_duration", "flow_iat_mean"]},
             },
             "prior": {"attack_rate_after": [0.5]},
             "concept": {
@@ -134,10 +134,12 @@ def test_small_benchmark_detects_strong_covariate_shift():
         "failures_per_100_windows_before_onset",
         "share_of_windows_blocked_after_onset",
     }
-    assert gx["share_of_windows_blocked_after_onset"] > 0.5  # a x3 shift leaves the fitted bounds
-    # the clean-window failure rate is not asserted here: with bounds fitted on 3,600 rows and
-    # 300-row windows it is dominated by tail-estimation noise; the real E2 run reports it
-    assert gx["failures_per_100_windows_before_onset"] is not None
+    # the monitor's suite checks data quality, not distribution: a x3 covariate shift is drift,
+    # so it must not be blocked as broken data (it was, at every factor, with percentile bounds)
+    assert gx["share_of_windows_blocked_after_onset"] == 0.0
+    assert gx["failures_per_100_windows_before_onset"] == 0.0
+    policy = results["covariate:factor=3.0"]["detectors"]["policy"]
+    assert policy["miss_rate"] == 0.0
     assert set(results) == {
         "covariate:factor=3.0",
         "prior:attack_rate_after=0.5",

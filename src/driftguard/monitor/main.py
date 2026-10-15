@@ -276,7 +276,7 @@ class MonitorService:
         from driftguard.data.schemas import topic_name
         from driftguard.data.serde import TopicSerde, registry_client
         from driftguard.monitor.reference import ReferenceProvider
-        from driftguard.training.validate import GXValidator, load_bounds
+        from driftguard.training.validate import GXValidator, physical_bounds
 
         self.settings = get_settings()
         self.dataset = dataset
@@ -297,10 +297,11 @@ class MonitorService:
         self.drift_serde = TopicSerde(client, "drift")
         self.redis = Redis.from_url(self.settings.redis_url, decode_responses=True)
         gx_cfg = data_cfg.get("gx", {})
-        bounds = load_bounds(self.settings.config_path("data", f"{dataset}_gx_bounds.json"))
+        # a data-quality suite (finite, non-null, physical limits), not distribution bounds: window
+        # bounds fitted to the reference would flag every real drift as broken data (D-022)
         gx = GXValidator(
-            bounds,
-            float(gx_cfg.get("mostly", 0.99)),
+            physical_bounds(dataset),
+            float(gx_cfg.get("monitor_mostly", 1.0)),
             int(gx_cfg.get("min_window_rows", 100)),
             name=f"{dataset}_window",
         )

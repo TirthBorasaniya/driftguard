@@ -17,7 +17,7 @@ from driftguard.monitor.main import MonitorCore
 from driftguard.monitor.policy import CHANGE_SIGNALS, THRESHOLD_SIGNALS
 from driftguard.monitor.reference import Reference, build_reference
 from driftguard.training.train import predict_scores, select_threshold, train_model
-from driftguard.training.validate import GXValidator, fit_bounds
+from driftguard.training.validate import GXValidator, physical_bounds
 
 # ============= Constants =============
 
@@ -114,11 +114,11 @@ def prepare_base(
         int(policy_config["psi_bins"]),
         int(policy_config["evidently_max_rows"]),
     )
-    # the deployed monitor blocks windows that fail the GX suite, so E2's policy must too
+    # the deployed monitor blocks windows that fail its quality suite, so E2's policy must too
     gx_cfg = dataset_config(dataset)["gx"]
     gx = GXValidator(
-        fit_bounds(reference_rows, features),
-        float(gx_cfg["mostly"]),
+        physical_bounds(dataset),
+        float(gx_cfg["monitor_mostly"]),
         int(gx_cfg["min_window_rows"]),
         name=f"{dataset}_e2",
     )

@@ -13,7 +13,40 @@ LOWER_PERCENTILE = 0.1
 UPPER_PERCENTILE = 99.9
 
 
+FLOAT32_MAX = 3.4e38
+
+
 # ============= Bounds =============
+
+
+def physical_bounds(dataset: str) -> dict[str, list[float]]:
+    """
+    Physical validity limits per feature from the dataset config (never fitted to data).
+
+    A feature without a configured minimum or maximum gets the float32 range, so the suite still
+    rejects infinities and nulls. Unlike percentile bounds, these limits describe broken data
+    (negative durations, ports above 65535, non-finite values), not drifted data: a window whose
+    distribution has moved still passes.
+
+    Parameters
+    ----------
+    dataset : str
+        Dataset name.
+
+    Returns
+    -------
+    bounds : dict
+        Feature name to `[low, high]`.
+    """
+    from driftguard.data.registry import feature_specs
+
+    return {
+        spec["name"]: [
+            -FLOAT32_MAX if spec.get("min") is None else float(spec["min"]),
+            FLOAT32_MAX if spec.get("max") is None else float(spec["max"]),
+        ]
+        for spec in feature_specs(dataset)
+    }
 
 
 def fit_bounds(
