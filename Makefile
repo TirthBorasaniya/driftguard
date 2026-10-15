@@ -61,6 +61,8 @@ producer:
 
 up:
 	./scripts/check_stack_free.sh compose
+	@test -f data/raw/cicids2017_improved/monday.csv || $(MAKE) download-cicids
+	@test -f configs/data/cicids2017_gx_bounds.json || $(MAKE) fit-gx-bounds
 	docker compose up -d --build --wait
 
 down:
@@ -162,3 +164,8 @@ k8s-validate:
 		-schema-location default \
 		-schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
 		.tmp/rendered.yaml deploy/k8s/strimzi/*.yaml deploy/k8s/keda/*.yaml
+
+.PHONY: demo
+
+demo: bootstrap
+	$(PY) scripts/demo.py $(ARGS)
