@@ -52,6 +52,8 @@ def main() -> None:
     model, _ = train_model(
         x, frame["label"].to_numpy(), model_cfg["lightgbm"], int(model_cfg["seed"])
     )
+    # equal thread counts: the config trains with n_jobs > 1, but ONNX runs single-threaded
+    model.set_params(n_jobs=int(config["onnx_threads"]))
     session = onnx_session(
         to_onnx_bytes(
             model,

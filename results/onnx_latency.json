@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-10-15T21-12-52Z_onnx_latency",
+  "git_sha": "e16b796",
+  "git_dirty": true,
+  "timestamp_utc": "2026-10-15T21:12:52Z",
+  "config_path": "configs/eval/onnx_latency.yaml",
+  "config_sha256": "198be3e36abea10057e2dce5afbafe42c95e83c4c28862a05c110d2819027dde",
+  "environment": {
+    "python": "3.11.17",
+    "platform": "darwin",
+    "packages": {
+      "lightgbm": "4.6.0",
+      "numpy": "1.26.4",
+      "pandas": "2.2.3",
+      "scikit-learn": "1.6.1",
+      "onnxruntime": "1.31.0",
+      "onnxmltools": "1.16.0",
+      "mlflow": "2.22.5",
+      "prefect": "3.4.25",
+      "feast": "0.49.0",
+      "great-expectations": "1.24.0",
+      "evidently": "0.4.40",
+      "river": "0.23.0",
+      "confluent-kafka": "2.16.0",
+      "redis": "4.6.0",
+      "fastapi": "0.143.1"
+    },
+    "hardware": "arm, 10 logical CPUs"
+  },
+  "metrics": {
+    "n_features": 83,
+    "n_estimators": 100,
+    "rows": [
+      {
+        "batch_size": 1,
+        "native": {
+          "p50_ms": 0.15825004084035754,
+          "p95_ms": 0.1694840291747823,
+          "throughput_rows_per_s": 6319.1136930498415
+        },
+        "onnx": {
+          "p50_ms": 0.0038750004023313522,
+          "p95_ms": 0.004208006430417299,
+          "throughput_rows_per_s": 258064.4893348555
+        },
+        "speedup_p50": 40.83871597668689
+      },
+      {
+        "batch_size": 8,
+        "native": {
+          "p50_ms": 0.16487500397488475,
+          "p95_ms": 0.17437916831113398,
+          "throughput_rows_per_s": 48521.606108459186
+        },
+        "onnx": {
+          "p50_ms": 0.0160830095410347,
+          "p95_ms": 0.016874982975423336,
+          "throughput_rows_per_s": 497419.340552435
+        },
+        "speedup_p50": 10.25150196884591
+      },
+      {
+        "batch_size": 32,
+        "native": {
+          "p50_ms": 0.18104200717061758,
+          "p95_ms": 0.1893771142931655,
+          "throughput_rows_per_s": 176754.5582382025
+        },
+        "onnx": {
+          "p50_ms": 0.028458016458898783,
+          "p95_ms": 0.029583045397885144,
+          "throughput_rows_per_s": 1124463.4722246653
+        },
+        "speedup_p50": 6.361722625049857
+      },
+      {
+        "batch_size": 128,
+        "native": {
+          "p50_ms": 0.24645798839628696,
+          "p95_ms": 0.2539600885938853,
+          "throughput_rows_per_s": 519358.2923925561
+        },
+        "onnx": {
+          "p50_ms": 0.07064550300128758,
+          "p95_ms": 0.07391813851427287,
+          "throughput_rows_per_s": 1811863.382127339
+        },
+        "speedup_p50": 3.4886578469374765
+      },
+      {
+        "batch_size": 256,
+        "native": {
+          "p50_ms": 0.3300835087429732,
+          "p95_ms": 0.3393222985323518,
+          "throughput_rows_per_s": 775561.3146954883
+        },
+        "onnx": {
+          "p50_ms": 0.12499996228143573,
+          "p95_ms": 0.1291815424337983,
+          "throughput_rows_per_s": 2048000.6179811435
+        },
+        "speedup_p50": 2.6406688667616924
+      },
+      {
+        "batch_size": 512,
+        "native": {
+          "p50_ms": 0.5009585293009877,
+          "p95_ms": 0.5190934491110966,
+          "throughput_rows_per_s": 1022040.688107295
+        },
+        "onnx": {
+          "p50_ms": 0.23150001652538776,
+          "p95_ms": 0.23946733854245394,
+          "throughput_rows_per_s": 2211662.909077377
+        },
+        "speedup_p50": 2.1639675746893494
+      },
+      {
+        "batch_size": 1024,
+        "native": {
+          "p50_ms": 0.8603125170338899,
+          "p95_ms": 0.8872520498698577,
+          "throughput_rows_per_s": 1190265.1417074082
+        },
+        "onnx": {
+          "p50_ms": 0.45537500409409404,
+          "p95_ms": 0.46642114757560194,
+          "throughput_rows_per_s": 2248696.1093464214
+        },
+        "speedup_p50": 1.889239658082163
+      }
+    ]
+  },
+  "notes": "Same LightGBM configuration as the champion, trained on Monday and Tuesday. Single-threaded ONNX Runtime session; native path is LGBMClassifier.predict_proba."
+}

@@ -204,7 +204,17 @@ Not yet run. Reproduce with `make loadtest-k8s`.
 ### ONNX Runtime latency
 
 <!-- results:onnx_latency:start -->
-Not yet run. Reproduce with `make benchmark-onnx`.
+| Batch | Native p50 ms | ONNX p50 ms | Native p95 ms | ONNX p95 ms | Speedup (p50) |
+|---|---|---|---|---|---|
+| 1 | 0.1583 | 0.0039 | 0.1695 | 0.0042 | 40.8387 |
+| 8 | 0.1649 | 0.0161 | 0.1744 | 0.0169 | 10.2515 |
+| 32 | 0.1810 | 0.0285 | 0.1894 | 0.0296 | 6.3617 |
+| 128 | 0.2465 | 0.0706 | 0.2540 | 0.0739 | 3.4887 |
+| 256 | 0.3301 | 0.1250 | 0.3393 | 0.1292 | 2.6407 |
+| 512 | 0.5010 | 0.2315 | 0.5191 | 0.2395 | 2.1640 |
+| 1,024 | 0.8603 | 0.4554 | 0.8873 | 0.4664 | 1.8892 |
+
+_Source: `results/onnx_latency.json`, run `2026-10-15T21-12-52Z_onnx_latency`, git `e16b796`, hardware: arm, 10 logical CPUs._
 <!-- results:onnx_latency:end -->
 
 ### E4 End-to-end adaptation
