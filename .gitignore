@@ -94,7 +94,6 @@ Thumbs.db
 *.orig
 *.rej
 *~
-.claude/
 .cursorrules
 scratch/
 
@@ -110,12 +109,19 @@ htmlcov/
 .idea/
 
 # Local-only session specs (not pushed)
-CLAUDE_domain_migration.md
 P1_COMBINED_SESSION.md
 
 # Local build/session scaffolding — untracked and ignored. These describe how
-# the project was developed rather than how it works, and CLAUDE.md in
 # particular still documented a superseded domain. Kept locally, not published.
 AUDIT_REPORT.md
-CLAUDE.md
 IMPLEMENTATION_REPORT.md
+*.py[cod]
+.cache/
+.kube/
+.tmp/
+/data/
+/models/
+/logs/
+/mlruns/
+/recordings/
+*.log
