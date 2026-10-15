@@ -89,3 +89,16 @@ replay:
 benchmark-drift:
 	$(PY) scripts/benchmark_drift.py
 	$(PY) scripts/render_results.py
+
+.PHONY: eval-e5 rollback test-e2e
+
+eval-e5:
+	$(PY) scripts/eval_e5.py
+	$(PY) scripts/render_results.py
+
+rollback:
+	@test -n "$(DATASET)" || (echo "usage: make rollback DATASET=cicids2017" && exit 1)
+	$(PY) scripts/rollback.py --dataset $(DATASET)
+
+test-e2e:
+	$(UV) run pytest -m e2e tests/e2e

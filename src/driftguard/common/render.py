@@ -200,10 +200,42 @@ def _headline_e2(doc: dict[str, Any]) -> str:
     return "; ".join(items) or "see table"
 
 
+def render_e5_gate(doc: dict[str, Any]) -> str:
+    """Render E5: decision, delta, and interval per synthetic challenger."""
+    m = doc["metrics"]
+    rows = [
+        [
+            name,
+            r["expected"],
+            r["decision"],
+            r["delta_pr_auc"],
+            f"[{r['ci_low']:.4f}, {r['ci_high']:.4f}]",
+            r["matches_expected"],
+        ]
+        for name, r in m["challengers"].items()
+    ]
+    head = (
+        f"{m['shadow_events']:,} shadow events ({m['shadow_positive']:,} attacks), "
+        f"margin {next(iter(m['challengers'].values()))['margin']}, "
+        f"{next(iter(m['challengers'].values()))['n_resamples']:,} paired resamples."
+    )
+    return (
+        head
+        + "\n\n"
+        + table(["Challenger", "Expected", "Decision", "Delta PR-AUC", "95% CI", "Matches"], rows)
+    )
+
+
+def _headline_e5(doc: dict[str, Any]) -> str:
+    decisions = ", ".join(f"{k}: {v['decision']}" for k, v in doc["metrics"]["challengers"].items())
+    return f"{decisions} (all as expected: {fmt(doc['metrics']['all_match_expected'])})"
+
+
 RENDERERS: dict[str, tuple[str, Renderer | None]] = {
     "v1_verified_run": ("make import-v1-results", render_v1_verified_run),
     "e1_model_quality": ("make eval-e1", render_e1_model_quality),
     "e2_drift_detection": ("make benchmark-drift", render_e2_drift_detection),
+    "e5_gate": ("make eval-e5", render_e5_gate),
 }
 
 # each headline row: (guarantee, results name, make target, extractor returning the value text)

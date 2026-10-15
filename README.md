@@ -50,6 +50,16 @@ delayed labels, so results are reported at label coverage 1.0 and 0.3. Reproduce
 Not yet run. Reproduce with `make benchmark-drift`.
 <!-- results:e2_drift_detection:end -->
 
+### E5 Promotion gate correctness
+
+Three synthetic challengers go through the shadow gate against one champion on the same 3,000
+labeled events. Every alias change in a live run is appended to `results/promotions.jsonl`.
+Reproduce with `make eval-e5`.
+
+<!-- results:e5_gate:start -->
+Not yet run. Reproduce with `make eval-e5`.
+<!-- results:e5_gate:end -->
+
 ### First version (historical, transcribed)
 
 <!-- results:v1_verified_run:start -->

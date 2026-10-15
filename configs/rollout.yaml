@@ -1,0 +1,15 @@
+# Rollout configuration (SPEC 7, 12).
+version: 2
+shadow_min_labeled: 3000
+promotion_margin: 0.01
+bootstrap_resamples: 1000
+bootstrap_seed: 7
+canary_fraction: 0.10
+canary_min_events: 20000
+guardrails: {p99_latency_ms: 50, error_rate: 0.005, positive_rate_ratio: [0.5, 1.5]}
+guardrail_check_s: 30
+guardrail_window: 2m
+watcher_poll_s: 10
+warmup_rows: 256
+max_batch_events: 256
+recent_buffer: 1000
