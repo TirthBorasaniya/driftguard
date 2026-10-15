@@ -1,0 +1,26 @@
+# E1 model quality (SPEC 9, E1).
+version: 1
+dataset: cicids2017
+model_config: configs/model.yaml
+target_recall: 0.95
+protocols:
+  # primary: unseen attack families on Thursday and Friday
+  time_ordered:
+    train_days: [monday, tuesday, wednesday]
+    test_days: [thursday, friday]
+  # secondary: first part of each day trains, the rest of the same day tests
+  within_day:
+    train_fraction: 0.7
+  # upper-bound reference only; mixes families across train and test
+  random_stratified:
+    test_fraction: 0.3
+# threshold-selection slice taken from the training portion; never from the test days
+validation:
+  method: random_stratified
+  fraction: 0.1
+ablations:
+  o_drop_dst_port: true
+  attempted_policies: [benign, attack, drop]
+  # CICFlowMeter only versus CICFlowMeter plus stream-computed behavioral features (needs Redis)
+  o_stream_features: false
+o_run_from_scratch: false

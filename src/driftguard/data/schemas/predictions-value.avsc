@@ -1,0 +1,62 @@
+{
+  "type": "record",
+  "name": "Prediction",
+  "namespace": "io.driftguard",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string"
+    },
+    {
+      "name": "dataset",
+      "type": "string"
+    },
+    {
+      "name": "event_time",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "model_alias",
+      "type": "string"
+    },
+    {
+      "name": "model_version",
+      "type": "string"
+    },
+    {
+      "name": "score",
+      "type": "double"
+    },
+    {
+      "name": "decision",
+      "type": "int"
+    },
+    {
+      "name": "threshold",
+      "type": "double"
+    },
+    {
+      "name": "latency_ms",
+      "type": "double"
+    },
+    {
+      "name": "shadow_score",
+      "type": [
+        "null",
+        "double"
+      ],
+      "default": null
+    },
+    {
+      "name": "shadow_version",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    }
+  ]
+}

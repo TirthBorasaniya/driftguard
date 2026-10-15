@@ -1,0 +1,44 @@
+{
+  "type": "record",
+  "name": "DriftEvent",
+  "namespace": "io.driftguard",
+  "fields": [
+    {
+      "name": "dataset",
+      "type": "string"
+    },
+    {
+      "name": "window_id",
+      "type": "string"
+    },
+    {
+      "name": "detected_at",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "signals",
+      "type": {
+        "type": "map",
+        "values": "double"
+      }
+    },
+    {
+      "name": "severity",
+      "type": {
+        "type": "enum",
+        "name": "Severity",
+        "symbols": [
+          "LOW",
+          "HIGH"
+        ]
+      }
+    },
+    {
+      "name": "policy_version",
+      "type": "int"
+    }
+  ]
+}

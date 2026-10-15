@@ -38,3 +38,21 @@ import-v1-results:
 clean:
 	find . -path ./.venv -prune -o -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; true
 	rm -rf .pytest_cache .ruff_cache .tmp/pytest
+
+.PHONY: download-cicids schemas schemas-check eval-e1 producer
+
+download-cicids:
+	$(PY) scripts/download_cicids2017_improved.py
+
+schemas:
+	$(PY) scripts/generate_avro_schemas.py
+
+schemas-check:
+	$(PY) scripts/generate_avro_schemas.py --check
+
+eval-e1:
+	$(PY) scripts/eval_e1.py
+	$(PY) scripts/render_results.py
+
+producer:
+	$(PY) -m driftguard.producer.replay

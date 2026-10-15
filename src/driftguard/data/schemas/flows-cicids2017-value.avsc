@@ -1,0 +1,370 @@
+{
+  "type": "record",
+  "name": "Cicids2017Flow",
+  "namespace": "io.driftguard",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string"
+    },
+    {
+      "name": "dataset",
+      "type": "string"
+    },
+    {
+      "name": "source_file",
+      "type": "string"
+    },
+    {
+      "name": "row_index",
+      "type": "long"
+    },
+    {
+      "name": "event_time",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "src_ip",
+      "type": "string"
+    },
+    {
+      "name": "dst_ip",
+      "type": "string"
+    },
+    {
+      "name": "dst_port",
+      "type": "double"
+    },
+    {
+      "name": "protocol",
+      "type": "double"
+    },
+    {
+      "name": "flow_duration",
+      "type": "double"
+    },
+    {
+      "name": "total_fwd_packet",
+      "type": "double"
+    },
+    {
+      "name": "total_bwd_packets",
+      "type": "double"
+    },
+    {
+      "name": "total_length_of_fwd_packet",
+      "type": "double"
+    },
+    {
+      "name": "total_length_of_bwd_packet",
+      "type": "double"
+    },
+    {
+      "name": "fwd_packet_length_max",
+      "type": "double"
+    },
+    {
+      "name": "fwd_packet_length_min",
+      "type": "double"
+    },
+    {
+      "name": "fwd_packet_length_mean",
+      "type": "double"
+    },
+    {
+      "name": "fwd_packet_length_std",
+      "type": "double"
+    },
+    {
+      "name": "bwd_packet_length_max",
+      "type": "double"
+    },
+    {
+      "name": "bwd_packet_length_min",
+      "type": "double"
+    },
+    {
+      "name": "bwd_packet_length_mean",
+      "type": "double"
+    },
+    {
+      "name": "bwd_packet_length_std",
+      "type": "double"
+    },
+    {
+      "name": "flow_bytes_per_sec",
+      "type": "double"
+    },
+    {
+      "name": "flow_packets_per_sec",
+      "type": "double"
+    },
+    {
+      "name": "flow_iat_mean",
+      "type": "double"
+    },
+    {
+      "name": "flow_iat_std",
+      "type": "double"
+    },
+    {
+      "name": "flow_iat_max",
+      "type": "double"
+    },
+    {
+      "name": "flow_iat_min",
+      "type": "double"
+    },
+    {
+      "name": "fwd_iat_total",
+      "type": "double"
+    },
+    {
+      "name": "fwd_iat_mean",
+      "type": "double"
+    },
+    {
+      "name": "fwd_iat_std",
+      "type": "double"
+    },
+    {
+      "name": "fwd_iat_max",
+      "type": "double"
+    },
+    {
+      "name": "fwd_iat_min",
+      "type": "double"
+    },
+    {
+      "name": "bwd_iat_total",
+      "type": "double"
+    },
+    {
+      "name": "bwd_iat_mean",
+      "type": "double"
+    },
+    {
+      "name": "bwd_iat_std",
+      "type": "double"
+    },
+    {
+      "name": "bwd_iat_max",
+      "type": "double"
+    },
+    {
+      "name": "bwd_iat_min",
+      "type": "double"
+    },
+    {
+      "name": "fwd_psh_flags",
+      "type": "double"
+    },
+    {
+      "name": "bwd_psh_flags",
+      "type": "double"
+    },
+    {
+      "name": "fwd_urg_flags",
+      "type": "double"
+    },
+    {
+      "name": "bwd_urg_flags",
+      "type": "double"
+    },
+    {
+      "name": "fwd_rst_flags",
+      "type": "double"
+    },
+    {
+      "name": "bwd_rst_flags",
+      "type": "double"
+    },
+    {
+      "name": "fwd_header_length",
+      "type": "double"
+    },
+    {
+      "name": "bwd_header_length",
+      "type": "double"
+    },
+    {
+      "name": "fwd_packets_per_sec",
+      "type": "double"
+    },
+    {
+      "name": "bwd_packets_per_sec",
+      "type": "double"
+    },
+    {
+      "name": "packet_length_min",
+      "type": "double"
+    },
+    {
+      "name": "packet_length_max",
+      "type": "double"
+    },
+    {
+      "name": "packet_length_mean",
+      "type": "double"
+    },
+    {
+      "name": "packet_length_std",
+      "type": "double"
+    },
+    {
+      "name": "packet_length_variance",
+      "type": "double"
+    },
+    {
+      "name": "fin_flag_count",
+      "type": "double"
+    },
+    {
+      "name": "syn_flag_count",
+      "type": "double"
+    },
+    {
+      "name": "rst_flag_count",
+      "type": "double"
+    },
+    {
+      "name": "psh_flag_count",
+      "type": "double"
+    },
+    {
+      "name": "ack_flag_count",
+      "type": "double"
+    },
+    {
+      "name": "urg_flag_count",
+      "type": "double"
+    },
+    {
+      "name": "cwr_flag_count",
+      "type": "double"
+    },
+    {
+      "name": "ece_flag_count",
+      "type": "double"
+    },
+    {
+      "name": "down_per_up_ratio",
+      "type": "double"
+    },
+    {
+      "name": "average_packet_size",
+      "type": "double"
+    },
+    {
+      "name": "fwd_segment_size_avg",
+      "type": "double"
+    },
+    {
+      "name": "bwd_segment_size_avg",
+      "type": "double"
+    },
+    {
+      "name": "fwd_bytes_per_bulk_avg",
+      "type": "double"
+    },
+    {
+      "name": "fwd_packet_per_bulk_avg",
+      "type": "double"
+    },
+    {
+      "name": "fwd_bulk_rate_avg",
+      "type": "double"
+    },
+    {
+      "name": "bwd_bytes_per_bulk_avg",
+      "type": "double"
+    },
+    {
+      "name": "bwd_packet_per_bulk_avg",
+      "type": "double"
+    },
+    {
+      "name": "bwd_bulk_rate_avg",
+      "type": "double"
+    },
+    {
+      "name": "subflow_fwd_packets",
+      "type": "double"
+    },
+    {
+      "name": "subflow_fwd_bytes",
+      "type": "double"
+    },
+    {
+      "name": "subflow_bwd_packets",
+      "type": "double"
+    },
+    {
+      "name": "subflow_bwd_bytes",
+      "type": "double"
+    },
+    {
+      "name": "fwd_init_win_bytes",
+      "type": "double"
+    },
+    {
+      "name": "bwd_init_win_bytes",
+      "type": "double"
+    },
+    {
+      "name": "fwd_act_data_pkts",
+      "type": "double"
+    },
+    {
+      "name": "fwd_seg_size_min",
+      "type": "double"
+    },
+    {
+      "name": "active_mean",
+      "type": "double"
+    },
+    {
+      "name": "active_std",
+      "type": "double"
+    },
+    {
+      "name": "active_max",
+      "type": "double"
+    },
+    {
+      "name": "active_min",
+      "type": "double"
+    },
+    {
+      "name": "idle_mean",
+      "type": "double"
+    },
+    {
+      "name": "idle_std",
+      "type": "double"
+    },
+    {
+      "name": "idle_max",
+      "type": "double"
+    },
+    {
+      "name": "idle_min",
+      "type": "double"
+    },
+    {
+      "name": "icmp_code",
+      "type": "double"
+    },
+    {
+      "name": "icmp_type",
+      "type": "double"
+    },
+    {
+      "name": "total_tcp_flow_time",
+      "type": "double"
+    }
+  ]
+}

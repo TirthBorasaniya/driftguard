@@ -1,0 +1,483 @@
+# CICIDS2017 adapter configuration (SPEC 3.2).
+version: 1
+dataset: cicids2017
+# improved: DistriNet CNS2022 regenerated flows (default); original: CIC TrafficLabelling, comparison only
+source: improved
+# rows labeled "<attack> - Attempted": benign (label 0), attack (label 1), or drop
+attempted_policy: benign
+benign_label: BENIGN
+attempted_suffix: " - Attempted"
+day_order: [monday, tuesday, wednesday, thursday, friday]
+processed_dir: data/processed/cicids2017
+
+sources:
+  improved:
+    url: https://intrusion-detection.distrinet-research.be/CNS2022/Datasets/CICIDS2017_improved.zip
+    archive: CICIDS2017_improved.zip
+    sha256: 97fdb91d339e2d8cf5627f981b831e5e7e400b981c58181c451a38fd03c48883
+    raw_dir: data/raw/cicids2017_improved
+    encoding: utf-8
+    timestamp_format: "%Y-%m-%d %H:%M:%S.%f"
+    files:
+      monday: monday.csv
+      tuesday: tuesday.csv
+      wednesday: wednesday.csv
+      thursday: thursday.csv
+      friday: friday.csv
+    columns:
+      row_id: id
+      flow_id: Flow ID
+      src_ip: Src IP
+      src_port: Src Port
+      dst_ip: Dst IP
+      timestamp: Timestamp
+      label: Label
+      attempted_category: Attempted Category
+  original:
+    # CIC GeneratedLabelledFlows (TrafficLabelling); no SHA-256 published by CIC, files placed manually
+    url: https://www.unb.ca/cic/datasets/ids-2017.html
+    archive: null
+    sha256: null
+    raw_dir: data/raw/cicids2017
+    encoding: latin1
+    timestamp_format: null
+    files:
+      monday: Monday-WorkingHours.pcap_ISCX.csv
+      tuesday: Tuesday-WorkingHours.pcap_ISCX.csv
+      wednesday: Wednesday-workingHours.pcap_ISCX.csv
+      thursday: Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv
+      friday: Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv
+    columns:
+      row_id: null
+      flow_id: Flow ID
+      src_ip: Source IP
+      src_port: Source Port
+      dst_ip: Destination IP
+      timestamp: Timestamp
+      label: Label
+      attempted_category: null
+
+# identifiers and label columns that must never reach the model (unit-tested)
+excluded_columns: [row_id, flow_id, src_ip, src_port, dst_ip, timestamp, label, attempted_category]
+
+stream_features:
+  enabled: true
+
+# model features: snake_case name, column in each source (null when absent), schema-level bounds
+# used by the consumer's validation step (physical limits, not fitted percentiles)
+features:
+  - name: dst_port
+    improved: "Dst Port"
+    original: "Destination Port"
+    min: 0
+    max: 65535
+  - name: protocol
+    improved: "Protocol"
+    original: "Protocol"
+    min: 0
+    max: 255
+  - name: flow_duration
+    improved: "Flow Duration"
+    original: "Flow Duration"
+    min: 0
+    max: null
+  - name: total_fwd_packet
+    improved: "Total Fwd Packet"
+    original: "Total Fwd Packets"
+    min: 0
+    max: null
+  - name: total_bwd_packets
+    improved: "Total Bwd packets"
+    original: "Total Backward Packets"
+    min: 0
+    max: null
+  - name: total_length_of_fwd_packet
+    improved: "Total Length of Fwd Packet"
+    original: "Total Length of Fwd Packets"
+    min: 0
+    max: null
+  - name: total_length_of_bwd_packet
+    improved: "Total Length of Bwd Packet"
+    original: "Total Length of Bwd Packets"
+    min: 0
+    max: null
+  - name: fwd_packet_length_max
+    improved: "Fwd Packet Length Max"
+    original: "Fwd Packet Length Max"
+    min: 0
+    max: null
+  - name: fwd_packet_length_min
+    improved: "Fwd Packet Length Min"
+    original: "Fwd Packet Length Min"
+    min: 0
+    max: null
+  - name: fwd_packet_length_mean
+    improved: "Fwd Packet Length Mean"
+    original: "Fwd Packet Length Mean"
+    min: 0
+    max: null
+  - name: fwd_packet_length_std
+    improved: "Fwd Packet Length Std"
+    original: "Fwd Packet Length Std"
+    min: 0
+    max: null
+  - name: bwd_packet_length_max
+    improved: "Bwd Packet Length Max"
+    original: "Bwd Packet Length Max"
+    min: 0
+    max: null
+  - name: bwd_packet_length_min
+    improved: "Bwd Packet Length Min"
+    original: "Bwd Packet Length Min"
+    min: 0
+    max: null
+  - name: bwd_packet_length_mean
+    improved: "Bwd Packet Length Mean"
+    original: "Bwd Packet Length Mean"
+    min: 0
+    max: null
+  - name: bwd_packet_length_std
+    improved: "Bwd Packet Length Std"
+    original: "Bwd Packet Length Std"
+    min: 0
+    max: null
+  - name: flow_bytes_per_sec
+    improved: "Flow Bytes/s"
+    original: "Flow Bytes/s"
+    min: 0
+    max: null
+  - name: flow_packets_per_sec
+    improved: "Flow Packets/s"
+    original: "Flow Packets/s"
+    min: 0
+    max: null
+  - name: flow_iat_mean
+    improved: "Flow IAT Mean"
+    original: "Flow IAT Mean"
+    min: 0
+    max: null
+  - name: flow_iat_std
+    improved: "Flow IAT Std"
+    original: "Flow IAT Std"
+    min: 0
+    max: null
+  - name: flow_iat_max
+    improved: "Flow IAT Max"
+    original: "Flow IAT Max"
+    min: 0
+    max: null
+  - name: flow_iat_min
+    improved: "Flow IAT Min"
+    original: "Flow IAT Min"
+    min: 0
+    max: null
+  - name: fwd_iat_total
+    improved: "Fwd IAT Total"
+    original: "Fwd IAT Total"
+    min: 0
+    max: null
+  - name: fwd_iat_mean
+    improved: "Fwd IAT Mean"
+    original: "Fwd IAT Mean"
+    min: 0
+    max: null
+  - name: fwd_iat_std
+    improved: "Fwd IAT Std"
+    original: "Fwd IAT Std"
+    min: 0
+    max: null
+  - name: fwd_iat_max
+    improved: "Fwd IAT Max"
+    original: "Fwd IAT Max"
+    min: 0
+    max: null
+  - name: fwd_iat_min
+    improved: "Fwd IAT Min"
+    original: "Fwd IAT Min"
+    min: 0
+    max: null
+  - name: bwd_iat_total
+    improved: "Bwd IAT Total"
+    original: "Bwd IAT Total"
+    min: 0
+    max: null
+  - name: bwd_iat_mean
+    improved: "Bwd IAT Mean"
+    original: "Bwd IAT Mean"
+    min: 0
+    max: null
+  - name: bwd_iat_std
+    improved: "Bwd IAT Std"
+    original: "Bwd IAT Std"
+    min: 0
+    max: null
+  - name: bwd_iat_max
+    improved: "Bwd IAT Max"
+    original: "Bwd IAT Max"
+    min: 0
+    max: null
+  - name: bwd_iat_min
+    improved: "Bwd IAT Min"
+    original: "Bwd IAT Min"
+    min: 0
+    max: null
+  - name: fwd_psh_flags
+    improved: "Fwd PSH Flags"
+    original: "Fwd PSH Flags"
+    min: 0
+    max: null
+  - name: bwd_psh_flags
+    improved: "Bwd PSH Flags"
+    original: "Bwd PSH Flags"
+    min: 0
+    max: null
+  - name: fwd_urg_flags
+    improved: "Fwd URG Flags"
+    original: "Fwd URG Flags"
+    min: 0
+    max: null
+  - name: bwd_urg_flags
+    improved: "Bwd URG Flags"
+    original: "Bwd URG Flags"
+    min: 0
+    max: null
+  - name: fwd_rst_flags
+    improved: "Fwd RST Flags"
+    original: null
+    min: 0
+    max: null
+  - name: bwd_rst_flags
+    improved: "Bwd RST Flags"
+    original: null
+    min: 0
+    max: null
+  - name: fwd_header_length
+    improved: "Fwd Header Length"
+    original: "Fwd Header Length"
+    min: null
+    max: null
+  - name: bwd_header_length
+    improved: "Bwd Header Length"
+    original: "Bwd Header Length"
+    min: null
+    max: null
+  - name: fwd_packets_per_sec
+    improved: "Fwd Packets/s"
+    original: "Fwd Packets/s"
+    min: 0
+    max: null
+  - name: bwd_packets_per_sec
+    improved: "Bwd Packets/s"
+    original: "Bwd Packets/s"
+    min: 0
+    max: null
+  - name: packet_length_min
+    improved: "Packet Length Min"
+    original: "Min Packet Length"
+    min: 0
+    max: null
+  - name: packet_length_max
+    improved: "Packet Length Max"
+    original: "Max Packet Length"
+    min: 0
+    max: null
+  - name: packet_length_mean
+    improved: "Packet Length Mean"
+    original: "Packet Length Mean"
+    min: 0
+    max: null
+  - name: packet_length_std
+    improved: "Packet Length Std"
+    original: "Packet Length Std"
+    min: 0
+    max: null
+  - name: packet_length_variance
+    improved: "Packet Length Variance"
+    original: "Packet Length Variance"
+    min: 0
+    max: null
+  - name: fin_flag_count
+    improved: "FIN Flag Count"
+    original: "FIN Flag Count"
+    min: 0
+    max: null
+  - name: syn_flag_count
+    improved: "SYN Flag Count"
+    original: "SYN Flag Count"
+    min: 0
+    max: null
+  - name: rst_flag_count
+    improved: "RST Flag Count"
+    original: "RST Flag Count"
+    min: 0
+    max: null
+  - name: psh_flag_count
+    improved: "PSH Flag Count"
+    original: "PSH Flag Count"
+    min: 0
+    max: null
+  - name: ack_flag_count
+    improved: "ACK Flag Count"
+    original: "ACK Flag Count"
+    min: 0
+    max: null
+  - name: urg_flag_count
+    improved: "URG Flag Count"
+    original: "URG Flag Count"
+    min: 0
+    max: null
+  - name: cwr_flag_count
+    improved: "CWR Flag Count"
+    original: "CWE Flag Count"
+    min: 0
+    max: null
+  - name: ece_flag_count
+    improved: "ECE Flag Count"
+    original: "ECE Flag Count"
+    min: 0
+    max: null
+  - name: down_per_up_ratio
+    improved: "Down/Up Ratio"
+    original: "Down/Up Ratio"
+    min: 0
+    max: null
+  - name: average_packet_size
+    improved: "Average Packet Size"
+    original: "Average Packet Size"
+    min: 0
+    max: null
+  - name: fwd_segment_size_avg
+    improved: "Fwd Segment Size Avg"
+    original: "Avg Fwd Segment Size"
+    min: 0
+    max: null
+  - name: bwd_segment_size_avg
+    improved: "Bwd Segment Size Avg"
+    original: "Avg Bwd Segment Size"
+    min: 0
+    max: null
+  - name: fwd_bytes_per_bulk_avg
+    improved: "Fwd Bytes/Bulk Avg"
+    original: "Fwd Avg Bytes/Bulk"
+    min: 0
+    max: null
+  - name: fwd_packet_per_bulk_avg
+    improved: "Fwd Packet/Bulk Avg"
+    original: "Fwd Avg Packets/Bulk"
+    min: 0
+    max: null
+  - name: fwd_bulk_rate_avg
+    improved: "Fwd Bulk Rate Avg"
+    original: "Fwd Avg Bulk Rate"
+    min: 0
+    max: null
+  - name: bwd_bytes_per_bulk_avg
+    improved: "Bwd Bytes/Bulk Avg"
+    original: "Bwd Avg Bytes/Bulk"
+    min: 0
+    max: null
+  - name: bwd_packet_per_bulk_avg
+    improved: "Bwd Packet/Bulk Avg"
+    original: "Bwd Avg Packets/Bulk"
+    min: 0
+    max: null
+  - name: bwd_bulk_rate_avg
+    improved: "Bwd Bulk Rate Avg"
+    original: "Bwd Avg Bulk Rate"
+    min: 0
+    max: null
+  - name: subflow_fwd_packets
+    improved: "Subflow Fwd Packets"
+    original: "Subflow Fwd Packets"
+    min: 0
+    max: null
+  - name: subflow_fwd_bytes
+    improved: "Subflow Fwd Bytes"
+    original: "Subflow Fwd Bytes"
+    min: 0
+    max: null
+  - name: subflow_bwd_packets
+    improved: "Subflow Bwd Packets"
+    original: "Subflow Bwd Packets"
+    min: 0
+    max: null
+  - name: subflow_bwd_bytes
+    improved: "Subflow Bwd Bytes"
+    original: "Subflow Bwd Bytes"
+    min: 0
+    max: null
+  - name: fwd_init_win_bytes
+    improved: "FWD Init Win Bytes"
+    original: "Init_Win_bytes_forward"
+    min: 0
+    max: null
+  - name: bwd_init_win_bytes
+    improved: "Bwd Init Win Bytes"
+    original: "Init_Win_bytes_backward"
+    min: 0
+    max: null
+  - name: fwd_act_data_pkts
+    improved: "Fwd Act Data Pkts"
+    original: "act_data_pkt_fwd"
+    min: 0
+    max: null
+  - name: fwd_seg_size_min
+    improved: "Fwd Seg Size Min"
+    original: "min_seg_size_forward"
+    min: 0
+    max: null
+  - name: active_mean
+    improved: "Active Mean"
+    original: "Active Mean"
+    min: 0
+    max: null
+  - name: active_std
+    improved: "Active Std"
+    original: "Active Std"
+    min: 0
+    max: null
+  - name: active_max
+    improved: "Active Max"
+    original: "Active Max"
+    min: 0
+    max: null
+  - name: active_min
+    improved: "Active Min"
+    original: "Active Min"
+    min: 0
+    max: null
+  - name: idle_mean
+    improved: "Idle Mean"
+    original: "Idle Mean"
+    min: 0
+    max: null
+  - name: idle_std
+    improved: "Idle Std"
+    original: "Idle Std"
+    min: 0
+    max: null
+  - name: idle_max
+    improved: "Idle Max"
+    original: "Idle Max"
+    min: 0
+    max: null
+  - name: idle_min
+    improved: "Idle Min"
+    original: "Idle Min"
+    min: 0
+    max: null
+  - name: icmp_code
+    improved: "ICMP Code"
+    original: null
+    min: -1
+    max: null
+  - name: icmp_type
+    improved: "ICMP Type"
+    original: null
+    min: -1
+    max: null
+  - name: total_tcp_flow_time
+    improved: "Total TCP Flow Time"
+    original: null
+    min: 0
+    max: null

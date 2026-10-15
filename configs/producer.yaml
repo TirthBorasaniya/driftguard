@@ -1,0 +1,32 @@
+# Replay producer configuration (SPEC 3.4).
+version: 1
+dataset: cicids2017
+# dataset: replay the adapter output; synthetic: generated flows for CI and integration tests
+source: dataset
+speed:
+  # max | fixed_rate | realtime_x
+  mode: max
+  rate_eps: 500
+  burst: 500
+  realtime_factor: 60.0
+label_delay_min: 2000
+label_delay_max: 10000
+label_coverage: 1.0
+duplicate_rate: 0.0
+duplicate_delay_max: 100
+seed: 42
+start_index: 0
+limit: null
+duration_s: null
+flush_every: 5000
+profile: benchmark
+profiles:
+  benchmark:
+    label_coverage: 1.0
+  realistic:
+    label_coverage: 0.3
+synthetic:
+  n_events: 10000
+  attack_rate: 0.05
+  start_time_ms: 1499083200000
+  step_ms: 5

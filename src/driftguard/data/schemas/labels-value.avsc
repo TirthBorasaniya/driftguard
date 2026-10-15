@@ -1,0 +1,26 @@
+{
+  "type": "record",
+  "name": "Label",
+  "namespace": "io.driftguard",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string"
+    },
+    {
+      "name": "label",
+      "type": "int"
+    },
+    {
+      "name": "label_family",
+      "type": "string"
+    },
+    {
+      "name": "label_time",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

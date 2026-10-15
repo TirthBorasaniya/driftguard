@@ -13,7 +13,9 @@ All numbers below are generated from `results/*.json` by `make results`. A row r
 run" has no measured value yet.
 
 <!-- results:headline:start -->
-No experiments registered.
+| Guarantee | Measured result | Evidence |
+|---|---|---|
+| Precision and recall at target recall, time-ordered | not yet run (`make eval-e1`) | `results/e1_model_quality.json` |
 <!-- results:headline:end -->
 
 ## Architecture
@@ -27,6 +29,15 @@ make setup && make up && make demo
 ```
 
 ## Evaluation
+
+### E1 Model quality (CICIDS2017)
+
+Time-ordered results lead: the model trains on Monday to Wednesday and is tested on Thursday and
+Friday, whose attack families never appear in training. Reproduce with `make eval-e1`.
+
+<!-- results:e1_model_quality:start -->
+Not yet run. Reproduce with `make eval-e1`.
+<!-- results:e1_model_quality:end -->
 
 ### First version (historical, transcribed)
 
