@@ -2,6 +2,8 @@
 
 import hashlib
 
+from driftguard.common.secrets import require_secret
+
 # ============= Keys =============
 
 
@@ -12,12 +14,13 @@ class HostKeyer:
     Parameters
     ----------
     salt : str
-        Secret salt from the environment (`IP_HASH_SALT`); required.
+        Secret salt from the environment (`IP_HASH_SALT`); rejected when empty, a placeholder, or
+        shorter than 16 characters, because a known salt makes the keys reversible by enumerating
+        IPv4 space.
     """
 
     def __init__(self, salt: str):
-        if not salt:
-            raise ValueError("IP_HASH_SALT must be set to compute stream-feature keys")
+        require_secret("IP_HASH_SALT", salt)
         self._salt = salt.encode()
         self._cache: dict[str, str] = {}
 

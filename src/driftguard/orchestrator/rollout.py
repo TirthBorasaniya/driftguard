@@ -335,6 +335,7 @@ class RolloutService:
             topic_name("labels", dataset): TopicSerde(client, "labels", dataset),
         }
         self.consumer.subscribe(list(self.topics))
+        self.decode_failures = 0
         self._running = True
 
     def healthy(self) -> bool:
@@ -355,7 +356,13 @@ class RolloutService:
             for message in self.consumer.consume(num_messages=2000, timeout=1.0):
                 if message.error():
                     continue
-                record = self.topics[message.topic()].deserialize(message.value())
+                try:
+                    record = self.topics[message.topic()].deserialize(message.value())
+                except Exception as exc:  # noqa: BLE001
+                    # one poison record or a Schema Registry blip must not end the controller
+                    self.decode_failures += 1
+                    logger.warning("rollout_decode_skip", error=type(exc).__name__)
+                    continue
                 if message.topic() == preds_t:
                     if record["dataset"] == self.dataset:
                         predictions.append(record)

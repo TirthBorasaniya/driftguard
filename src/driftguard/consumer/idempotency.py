@@ -11,6 +11,10 @@ PENDING_PREFIX = "pending:"
 NEW, DUPLICATE, HELD = "new", "duplicate", "held"
 
 
+class HeldClaimsError(RuntimeError):
+    """Event ids are still claimed by another consumer after the wait; retry after redelivery."""
+
+
 # ============= Store =============
 
 
@@ -136,6 +140,19 @@ class IdempotencyStore:
             total.duplicates += retry.duplicates
             total.held = retry.held
         return total
+
+    def renew(self, event_ids: list[str]) -> None:
+        """Extend the lease of this owner's pending claims (called between scoring chunks)."""
+        if not event_ids:
+            return
+        token = f"{PENDING_PREFIX}{self.owner}"
+        keys = [self.key(event_id) for event_id in event_ids]
+        values = self.redis.mget(keys)
+        pipe = self.redis.pipeline(transaction=False)
+        for key, value in zip(keys, values, strict=True):
+            if value == token:
+                pipe.expire(key, self.lease_s)
+        pipe.execute()
 
     def mark_done(self, event_ids: list[str]) -> None:
         """Mark ids as scored with the long TTL; called after predictions are flushed."""

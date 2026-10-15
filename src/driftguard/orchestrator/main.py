@@ -93,7 +93,13 @@ class OrchestratorService:
         while self._running:
             message = self.consumer.poll(1.0)
             if message is not None and not message.error():
-                event = self.serde.deserialize(message.value())
+                try:
+                    event = self.serde.deserialize(message.value())
+                except Exception as exc:  # noqa: BLE001
+                    # a poison drift record would otherwise crash-loop the service; skip it
+                    logger.error("drift_event_undecodable", error=type(exc).__name__)
+                    self.consumer.commit(message=message, asynchronous=False)
+                    continue
                 outcome = handle_drift_event(event, self.store, self.redis, self._submit)
                 logger.info(
                     "drift_event_handled",
@@ -123,8 +129,13 @@ def main() -> None:
     rollout = RolloutService(settings.dataset)
     signal.signal(signal.SIGTERM, lambda *_: (service.stop(), rollout.stop()))
     signal.signal(signal.SIGINT, lambda *_: (service.stop(), rollout.stop()))
-    start_metrics_server(settings.metrics_port, lambda: service.healthy() and rollout.healthy())
-    threading.Thread(target=rollout.run, name="rollout", daemon=True).start()
+    rollout_thread = threading.Thread(target=rollout.run, name="rollout", daemon=True)
+    rollout_thread.start()
+    # the rollout controller runs in a thread; its death must turn the health check red
+    start_metrics_server(
+        settings.metrics_port,
+        lambda: service.healthy() and rollout.healthy() and rollout_thread.is_alive(),
+    )
     service.run()
 
 

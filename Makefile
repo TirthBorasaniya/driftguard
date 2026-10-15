@@ -13,6 +13,7 @@ PY := $(UV) run python
 setup:
 	$(UV) python install 3.11
 	$(UV) sync --frozen --python 3.11
+	$(MAKE) env
 
 lint:
 	$(UV) run ruff check .
@@ -59,7 +60,7 @@ producer:
 
 .PHONY: up down logs bootstrap bootstrap-synthetic fit-gx-bounds test-integration replay
 
-up:
+up: env
 	./scripts/check_stack_free.sh compose
 	@test -f data/raw/cicids2017_improved/monday.csv || $(MAKE) download-cicids
 	@test -f configs/data/cicids2017_gx_bounds.json || $(MAKE) fit-gx-bounds
@@ -169,3 +170,8 @@ k8s-validate:
 
 demo: bootstrap
 	$(PY) scripts/demo.py $(ARGS)
+
+.PHONY: env
+
+env:
+	$(PY) scripts/init_env.py

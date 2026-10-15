@@ -133,3 +133,37 @@ def ensure_topics(bootstrap: str, datasets: tuple[str, ...], replication: int = 
             raise
     logger.info("topics_created", topics=created)
     return created
+
+
+# ============= Delivery tracking =============
+
+
+class DeliveryError(RuntimeError):
+    """One or more produced messages failed delivery."""
+
+
+class DeliveryTracker:
+    """
+    Records per-message delivery failures reported by librdkafka.
+
+    `Producer.flush` returns the number of messages still queued, not the number that failed, so a
+    message that failed fast is invisible to it. Pass `tracker` as `on_delivery` to every
+    `produce` call and call `raise_if_failed` after `flush`, before marking work done or
+    committing offsets.
+    """
+
+    def __init__(self) -> None:
+        self.failures: list[str] = []
+        self.delivered = 0
+
+    def __call__(self, err, msg) -> None:
+        if err is not None:
+            self.failures.append(f"{msg.topic()}[{msg.partition()}]: {err}")
+        else:
+            self.delivered += 1
+
+    def raise_if_failed(self) -> None:
+        """Raise DeliveryError (and clear the record) when any delivery failed."""
+        if self.failures:
+            failures, self.failures = self.failures, []
+            raise DeliveryError(f"{len(failures)} message(s) failed delivery: {failures[:3]}")

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from driftguard.common.config import load_config
 from driftguard.common.logging import configure_logging, get_logger
+from driftguard.common.secrets import secret_problem
 from driftguard.common.settings import Settings, get_settings
 from driftguard.serving import admin
 from driftguard.serving.model_store import AliasWatcher, ModelStore
@@ -122,8 +123,9 @@ def create_app(
 
     def require_token(authorization: Annotated[str | None, Header()] = None) -> None:
         expected = settings.admin_token.get_secret_value()
-        if not expected:
-            raise HTTPException(503, "admin API disabled: ADMIN_TOKEN is not set")
+        problem = secret_problem(expected)
+        if problem:
+            raise HTTPException(503, f"admin API disabled: ADMIN_TOKEN is {problem}")
         supplied = (authorization or "").removeprefix("Bearer ").strip()
         if not hmac.compare_digest(supplied.encode(), expected.encode()):
             raise HTTPException(401, "invalid admin token")

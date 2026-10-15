@@ -19,7 +19,7 @@ from driftguard.common.metrics import (
     CONSUMER_LAG,
     DUPLICATES,
     EVENTS_CONSUMED,
-    SCORING_LATENCY,
+    SCORING_ROUNDTRIP,
     SCORING_UNAVAILABLE,
     SHADOW_FAILURES,
     STREAM_FEATURE_SECONDS,
@@ -27,7 +27,7 @@ from driftguard.common.metrics import (
 )
 from driftguard.common.settings import get_settings
 from driftguard.consumer.dlq import DeadLetterQueue
-from driftguard.consumer.idempotency import IdempotencyStore
+from driftguard.consumer.idempotency import HeldClaimsError, IdempotencyStore
 from driftguard.consumer.scoring import SHADOW_MODE, ScoringClient, ScoringUnavailableError
 from driftguard.consumer.sinks import FeatureSink, feature_frame
 from driftguard.consumer.validation import FlowValidator, ValidationError
@@ -37,6 +37,18 @@ from driftguard.data.registry import feature_names
 
 logger = get_logger("consumer")
 StreamFeatureFn = Callable[[list[dict[str, Any]]], list[dict[str, float]]]
+
+
+def behavior_sink_enabled(dataset: str, stream_features_mode: str) -> bool:
+    """
+    True when behavioral rows should be persisted.
+
+    In load-test mode `off` the features are zeros, which must never reach the real offline
+    store that retraining and E4 read.
+    """
+    from driftguard.data.registry import stream_features_enabled
+
+    return stream_features_enabled(dataset) and stream_features_mode != "off"
 
 
 # ============= Batch processing =============
@@ -162,8 +174,9 @@ class BatchProcessor:
         )
         outcome.duplicates += len(claim.duplicates)
         if claim.held:
-            # still held after twice the lease: process anyway rather than lose the events
-            logger.warning("idempotency_wait_exhausted", count=len(claim.held))
+            # another live consumer still owns these ids; scoring them here would double-score, so
+            # fail the batch and let redelivery resolve it once the owner finishes or its lease ends
+            raise HeldClaimsError(f"{len(claim.held)} event ids are held by another consumer")
         skip = set(claim.duplicates)
         return [(m, r) for m, r in unique if r["event_id"] not in skip]
 
@@ -217,8 +230,10 @@ class BatchProcessor:
         names = self.features + (list(extra[0].keys()) if extra else [])
         by_id = {record["event_id"]: (message, record) for message, record in fresh}
         done: list[str] = []
+        claimed_ids = [eid for eid, _ in vectors]
         for start in range(0, len(vectors), self.batch_size):
             chunk = vectors[start : start + self.batch_size]
+            self.idempotency.renew(claimed_ids)
             self._score_chunk(chunk, names, by_id, outcome, done)
         self.flush()
         self.idempotency.mark_done(done)
@@ -229,6 +244,7 @@ class BatchProcessor:
         shadow_future = None
         if self.scorer.last_mode == SHADOW_MODE:
             shadow_future = self._shadow_pool.submit(self.scorer.score_shadow, chunk, names)
+        round_trip_start = time.perf_counter()
         try:
             response = self.scorer.score(chunk, names)
         except ScoringUnavailableError as exc:
@@ -239,6 +255,9 @@ class BatchProcessor:
                 self._to_dlq(message, "scoring_unavailable", str(exc)[:200], outcome)
             self.idempotency.release(ids)
             return
+        SCORING_ROUNDTRIP.labels(dataset=self.dataset).observe(
+            time.perf_counter() - round_trip_start
+        )
         shadow = None
         if shadow_future is not None:
             try:
@@ -247,9 +266,6 @@ class BatchProcessor:
                 # shadow scoring never fails a batch; the champion answer is already final
                 SHADOW_FAILURES.labels(dataset=self.dataset).inc()
         for result in response.results:
-            SCORING_LATENCY.labels(dataset=self.dataset, alias=result["model_alias"]).observe(
-                response.latency_ms / 1000.0
-            )
             _, record = by_id[result["event_id"]]
             prediction = {
                 "event_id": result["event_id"],
@@ -280,7 +296,7 @@ class ConsumerService:
         from confluent_kafka import Consumer, Producer
         from redis import Redis
 
-        from driftguard.common.kafka import consumer_config, producer_config
+        from driftguard.common.kafka import DeliveryTracker, consumer_config, producer_config
         from driftguard.data.schemas import topic_name
         from driftguard.data.serde import TopicSerde, registry_client
         from driftguard.features.offline import OfflineStore
@@ -296,6 +312,7 @@ class ConsumerService:
         self.consumer = Consumer(consumer_config(boot, cfg["group_id"], f"consumer-{self.owner}"))
         self.topic = topic_name("flows", dataset)
         self.producer = Producer(producer_config(boot, f"consumer-{self.owner}"))
+        self.delivery = DeliveryTracker()
         client = registry_client(self.settings.schema_registry_url)
         flow_serde = TopicSerde(client, "flows", dataset)
         self.pred_serde = TopicSerde(client, "predictions")
@@ -326,7 +343,7 @@ class ConsumerService:
                 backoff_max_s=scoring["backoff_max_s"],
                 shadow_timeout_s=scoring["shadow_timeout_s"],
             ),
-            dlq=DeadLetterQueue(self.producer.produce, dataset, topic_name("dlq")),
+            dlq=DeadLetterQueue(self._produce, dataset, topic_name("dlq")),
             emit_prediction=self._emit,
             flush=self._flush,
             stream_features=self._stream_features(),
@@ -351,6 +368,7 @@ class ConsumerService:
                 cfg["label_sink"]["flush_s"],
             )
         self._running = True
+        self._label_thread: threading.Thread | None = None
         self._assigned: list = []
 
     def _feast_store(self):
@@ -363,9 +381,7 @@ class ConsumerService:
         )
 
     def _behavior_sink(self, offline):
-        from driftguard.data.registry import stream_features_enabled
-
-        if not stream_features_enabled(self.dataset):
+        if not behavior_sink_enabled(self.dataset, self.settings.stream_features_mode):
             return None
         from driftguard.streamfeatures.push import BehaviorSink, feast_online_pusher
 
@@ -386,22 +402,29 @@ class ConsumerService:
 
         return build_stream_feature_fn(self.dataset, self.redis, self.settings)
 
-    def _emit(self, prediction: dict[str, Any]) -> None:
-        payload = self.pred_serde.serialize(prediction)
+    def _produce(self, topic: str, **kwargs: Any) -> None:
+        """Produce with a delivery callback, backing off while the local queue is full."""
         while True:
             try:
-                self.producer.produce(
-                    self.pred_serde.topic, key=prediction["event_id"].encode(), value=payload
-                )
+                self.producer.produce(topic, on_delivery=self.delivery, **kwargs)
                 break
             except BufferError:
                 self.producer.poll(0.1)
         self.producer.poll(0)
 
+    def _emit(self, prediction: dict[str, Any]) -> None:
+        self._produce(
+            self.pred_serde.topic,
+            key=prediction["event_id"].encode(),
+            value=self.pred_serde.serialize(prediction),
+        )
+
     def _flush(self) -> None:
+        """Flush and fail the batch on undelivered or failed messages (before mark_done/commit)."""
         remaining = self.producer.flush(30)
         if remaining:
             raise RuntimeError(f"{remaining} messages not delivered; batch will be redelivered")
+        self.delivery.raise_if_failed()
 
     def _on_assign(self, _consumer, partitions) -> None:
         self._assigned = list({(p.topic, p.partition) for p in partitions} | set(self._assigned))
@@ -428,8 +451,9 @@ class ConsumerService:
             CONSUMER_LAG.labels(dataset=self.dataset, partition=str(tp.partition)).set(lag)
 
     def healthy(self) -> bool:
-        """Liveness for `/healthz`."""
-        return self._running
+        """Liveness for `/healthz`: the poll loop runs and the label sink thread is alive."""
+        label_ok = self._label_thread is None or self._label_thread.is_alive()
+        return self._running and label_ok
 
     def stop(self, *_args: object) -> None:
         """Stop after the current batch."""
@@ -440,7 +464,10 @@ class ConsumerService:
         cfg = self.config
         self.consumer.subscribe([self.topic], on_assign=self._on_assign, on_revoke=self._on_revoke)
         if self.label_sink is not None:
-            threading.Thread(target=self.label_sink.run, name="label-sink", daemon=True).start()
+            self._label_thread = threading.Thread(
+                target=self.label_sink.run, name="label-sink", daemon=True
+            )
+            self._label_thread.start()
         last_lag = 0.0
         while self._running:
             raw = self.consumer.consume(

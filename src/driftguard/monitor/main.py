@@ -17,6 +17,7 @@ from driftguard.common.metrics import (
     KSWIN_DETECTIONS,
     LABELED_SINCE_PROMOTION,
     LATE_EVENTS,
+    MONITOR_DECODE_FAILURES,
     PSI_MAX,
     PSI_SHARE,
     RETRAINING_PAUSED,
@@ -239,7 +240,9 @@ class MonitorCore:
         key = PAUSE_KEY.format(dataset=self.dataset)
         if not gx_ok:
             DATA_QUALITY_FAILURES.labels(dataset=self.dataset).inc()
-            self.redis.set(key, PAUSED_BY_DATA_QUALITY)
+            # nx: an operator pause (or any other owner's value) must never be overwritten, or the
+            # next clean window would delete it as if it were a data-quality pause
+            self.redis.set(key, PAUSED_BY_DATA_QUALITY, nx=True)
             RETRAINING_PAUSED.labels(dataset=self.dataset).set(1)
             return
         if self.redis.get(key) == PAUSED_BY_DATA_QUALITY:
@@ -265,7 +268,7 @@ class MonitorService:
         from confluent_kafka import Consumer, Producer
         from redis import Redis
 
-        from driftguard.common.kafka import consumer_config, producer_config
+        from driftguard.common.kafka import DeliveryTracker, consumer_config, producer_config
         from driftguard.common.mlflow_client import MlflowRegistry
         from driftguard.data.schemas import topic_name
         from driftguard.data.serde import TopicSerde, registry_client
@@ -281,6 +284,7 @@ class MonitorService:
             consumer_config(boot, f"driftguard-monitor-{dataset}", f"monitor-{dataset}")
         )
         self.producer = Producer(producer_config(boot, f"monitor-{dataset}"))
+        self.delivery = DeliveryTracker()
         client = registry_client(self.settings.schema_registry_url)
         self.serdes = {
             topic_name("flows", dataset): TopicSerde(client, "flows", dataset),
@@ -317,12 +321,40 @@ class MonitorService:
         self._running = False
 
     def _refresh_reference(self) -> None:
-        changed = self.references.refresh()
+        try:
+            changed = self.references.refresh()
+        except Exception as exc:  # noqa: BLE001
+            # MLflow or artifact errors are transient; keep the current reference and retry later
+            logger.warning("reference_refresh_failed", error=str(exc))
+            return
         if self.references.current is not None and (changed or self.core.reference is None):
             self.core.set_reference(self.references.current, o_promotion=changed)
             logger.info(
                 "reference_loaded", version=self.references.current.version, promotion=changed
             )
+
+    def publish_drift_events(self, events: list[dict[str, Any]]) -> None:
+        """
+        Produce drift events and fail loudly if any is not delivered.
+
+        A lost drift event means retraining never triggers, so delivery is flushed and checked
+        before the input offsets are committed.
+        """
+        for event in events:
+            self.producer.produce(
+                self.drift_serde.topic,
+                key=self.dataset.encode(),
+                value=self.drift_serde.serialize(drift_record(event)),
+                on_delivery=self.delivery,
+            )
+            logger.info(
+                "drift_event_emitted", window_id=event["window_id"], severity=event["severity"]
+            )
+        if events:
+            remaining = self.producer.flush(30)
+            if remaining:
+                raise RuntimeError(f"{remaining} drift events not delivered")
+            self.delivery.raise_if_failed()
 
     def run(self) -> None:
         """Poll the three topics and emit drift events."""
@@ -342,8 +374,10 @@ class MonitorService:
                 try:
                     record = self.serdes[message.topic()].deserialize(message.value())
                 except Exception as exc:  # noqa: BLE001
-                    # malformed flows are already dead-lettered by the consumer; skip here
-                    logger.debug("monitor_decode_skip", error=type(exc).__name__)
+                    # malformed flows are already dead-lettered by the consumer; skip but count
+                    # and warn so a Schema Registry outage cannot silently drop traffic
+                    MONITOR_DECODE_FAILURES.labels(dataset=self.dataset).inc()
+                    logger.warning("monitor_decode_skip", error=type(exc).__name__)
                     continue
                 if message.topic() == preds_t and record["dataset"] != self.dataset:
                     continue
@@ -351,15 +385,7 @@ class MonitorService:
             events = self.core.on_flows(grouped[flows_t])
             events += self.core.on_predictions(grouped[preds_t])
             self.core.on_labels(grouped[topic_name("labels", self.dataset)])
-            for event in events:
-                self.producer.produce(
-                    self.drift_serde.topic,
-                    key=self.dataset.encode(),
-                    value=self.drift_serde.serialize(drift_record(event)),
-                )
-                logger.info(
-                    "drift_event_emitted", window_id=event["window_id"], severity=event["severity"]
-                )
+            self.publish_drift_events(events)
             self.producer.poll(0)
             if any(grouped.values()):
                 self.consumer.commit(asynchronous=True)

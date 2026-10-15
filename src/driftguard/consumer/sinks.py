@@ -5,6 +5,7 @@ import time
 from collections.abc import Callable
 
 import pandas as pd
+import pyarrow as pa
 
 from driftguard.common.logging import get_logger
 from driftguard.features.offline import OfflineStore
@@ -119,6 +120,8 @@ class LabelSink:
         self._buffer: list[dict] = []
         self._stop = threading.Event()
         self.written = 0
+        self.write_failures = 0
+        self.retry_backoff_s = 5.0
 
     def _flush(self) -> None:
         if not self._buffer:
@@ -130,8 +133,26 @@ class LabelSink:
         self.written += len(frame)
         self._buffer = []
 
+    def _try_flush(self) -> bool:
+        """
+        Flush the buffer, keeping it and skipping the commit when the write fails.
+
+        Returns
+        -------
+        ok : bool
+            False when the write failed; the same rows are retried on the next call, and offsets
+            are not committed, so no label is lost.
+        """
+        try:
+            self._flush()
+        except (OSError, pa.ArrowException) as exc:
+            self.write_failures += 1
+            logger.error("label_flush_failed", error=str(exc), buffered=len(self._buffer))
+            return False
+        return True
+
     def run(self) -> None:
-        """Consume until `stop()` is called."""
+        """Consume until `stop()` is called; write failures back off and retry."""
         last_flush = time.monotonic()
         while not self._stop.is_set():
             for message in self.consumer.consume(num_messages=1000, timeout=1.0):
@@ -145,9 +166,11 @@ class LabelSink:
                     logger.error("label_decode_failed", offset=message.offset(), error=str(exc))
             due = time.monotonic() - last_flush >= self.flush_s
             if len(self._buffer) >= self.flush_rows or (due and self._buffer):
-                self._flush()
-                last_flush = time.monotonic()
-        self._flush()
+                if self._try_flush():
+                    last_flush = time.monotonic()
+                else:
+                    self._stop.wait(self.retry_backoff_s)
+        self._try_flush()
 
     def stop(self) -> None:
         """Signal the run loop to finish after a final flush."""

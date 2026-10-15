@@ -40,6 +40,12 @@ SCORING_LATENCY = Histogram(
     ["dataset", "alias"],
     buckets=LATENCY_BUCKETS,
 )
+SCORING_ROUNDTRIP = Histogram(
+    f"{PREFIX}scoring_roundtrip_seconds",
+    "Consumer-side round trip of one scoring request (HTTP, serialization, inference)",
+    ["dataset"],
+    buckets=LATENCY_BUCKETS,
+)
 SCORING_ERRORS = Counter(
     f"{PREFIX}scoring_errors_total", "Scoring requests that failed", ["dataset", "alias"]
 )
@@ -95,6 +101,9 @@ WINDOWS_CLOSED = Counter(f"{PREFIX}windows_closed_total", "Monitor windows close
 WINDOWS_FLAGGED = Counter(f"{PREFIX}windows_flagged_total", "Monitor windows flagged", ["dataset"])
 DATA_QUALITY_FAILURES = Counter(
     f"{PREFIX}data_quality_failures_total", "Windows failing the GX suite", ["dataset"]
+)
+MONITOR_DECODE_FAILURES = Counter(
+    f"{PREFIX}monitor_decode_failures_total", "Messages the monitor could not decode", ["dataset"]
 )
 RETRAINING_PAUSED = Gauge(
     f"{PREFIX}retraining_paused", "1 while retraining is paused for the dataset", ["dataset"]

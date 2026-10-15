@@ -19,12 +19,13 @@ from driftguard.streamfeatures.offline import replay_features
 from driftguard.streamfeatures.windows import BEHAVIOR_FEATURES, StreamFeatureComputer
 
 pytestmark = pytest.mark.unit
+SALT = "unit-test-salt-0123456789"
 CONFIG = load_config("configs/stream_features.yaml").data
 
 
 def computer(redis=None):
     redis = redis or fakeredis.FakeRedis(decode_responses=True)
-    return StreamFeatureComputer(redis, HostKeyer("salt"), CONFIG), redis
+    return StreamFeatureComputer(redis, HostKeyer(SALT), CONFIG), redis
 
 
 def flow(i, t_s, src="10.0.0.1", dst="10.0.0.2", port=80, fwd=100.0, syn=0):
@@ -213,7 +214,7 @@ def test_consumer_sends_behavior_features_and_writes_behavior_rows():
             behavior_frames.append(frame)
 
     redis = fr.FakeRedis(decode_responses=True)
-    comp = StreamFeatureComputer(redis, HostKeyer("salt"), CONFIG)
+    comp = StreamFeatureComputer(redis, HostKeyer(SALT), CONFIG)
     proc = BatchProcessor(
         "cicids2017",
         lambda payload: json.loads(payload),

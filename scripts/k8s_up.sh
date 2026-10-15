@@ -23,6 +23,13 @@ set +a
 : "${ADMIN_TOKEN:?ADMIN_TOKEN must be set in .env}"
 : "${IP_HASH_SALT:?IP_HASH_SALT must be set in .env}"
 : "${GF_ADMIN_PASSWORD:?GF_ADMIN_PASSWORD must be set in .env}"
+for name in ADMIN_TOKEN IP_HASH_SALT GF_ADMIN_PASSWORD; do
+  value="${!name}"
+  if [[ ${#value} -lt 16 || "${value,,}" == "change-me" ]]; then
+    echo "${name} is a placeholder or shorter than 16 characters; run 'make env'." >&2
+    exit 1
+  fi
+done
 
 kind create cluster --config deploy/k8s/kind-config.yaml --kubeconfig "${KUBECONFIG}"
 docker build -f docker/app.Dockerfile -t driftguard-app:dev .

@@ -7,7 +7,8 @@ idempotency:
   key_prefix: "dg:seen:"
   ttl_s: 172800
   # a claim left "pending" by a dead consumer is reclaimed after this lease
-  lease_s: 30
+  # above the worst-case batch (scoring retries, sink writes, a 30 s flush); renewed per chunk
+  lease_s: 120
   wait_poll_s: 0.5
 scoring:
   batch_size: 256
