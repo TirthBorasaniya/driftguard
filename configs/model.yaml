@@ -5,7 +5,10 @@ seed: 42
 target_recall: 0.95
 lightgbm:
   objective: binary
-  n_estimators: 400
+  # 100: the largest of {50, 100, 150, 200, 300, 400} whose validation threshold keeps at least
+  # 1e-3 of headroom below 1.0; at 400 trees seen attackers score within 3e-6 of 1.0 and the
+  # recall-targeted threshold becomes brittle (DECISIONS D-019)
+  n_estimators: 100
   learning_rate: 0.05
   num_leaves: 63
   max_depth: -1

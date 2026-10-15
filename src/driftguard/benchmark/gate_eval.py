@@ -60,7 +60,8 @@ def run_e5(config_path: str) -> dict[str, Any]:
     features = feature_names(config["dataset"])
     champion_rows, _ = load_dataset(days=list(config["champion_days"]))
     post, _ = load_dataset(days=list(config["post_drift_days"]))
-    post = post.sample(frac=1.0, random_state=int(config["split_seed"])).reset_index(drop=True)
+    # time-ordered split: the challenger trains on the older part of the post-drift day and is
+    # judged on the newer part, as in live shadow traffic (a random split leaks near-duplicates)
     cut = int(len(post) * float(config["post_drift_train_fraction"]))
     post_train, pool = post.iloc[:cut], post.iloc[cut:]
     n_shadow = int(rollout["shadow_min_labeled"])

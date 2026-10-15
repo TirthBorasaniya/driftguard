@@ -108,12 +108,20 @@ Decision: `scripts/bootstrap.py` trains the initial champion on the initial trai
 Alternatives: serve a dummy model until the first retraining (rejected: scores would be meaningless).
 Consequences: this is the only model that serves without passing the gate; it is stated as a limitation.
 
-## D-016: E1 threshold validation slice
-Status: accepted (2026-10-14)
-Context: the last stretch of the training days may hold too few attacks to choose a threshold, and the test days must never be used.
-Decision: E1 selects the threshold on a random stratified 10% of the training days (configurable to the newest 10% by event time); retraining uses the newest slice by event time as the specification states.
-Alternatives: a time-ordered slice for E1 (available through configuration).
-Consequences: E1's threshold is not time-ordered within the training days; the test days stay untouched.
+## D-016: E1 validation by held-out blocks
+Status: accepted (2026-10-15), revised after the first E1 run
+Context: the first E1 run used a random stratified 10% of the training days for threshold selection and produced validation PR-AUC of about 1.0 and thresholds near 0.99999. Random slices put a temporal neighbor of every fit row into validation, and a newest-slice validation (as retraining uses) is unusable here because the last 60,000 training rows hold 7 attacks.
+Decision: hold out whole contiguous blocks of the stream (every 10th block of 5,000 flows) for threshold selection. Test days stay untouched.
+Result: blocked validation is the methodologically safer split but did not change the outcome: the threshold stayed at 0.999998 and validation PR-AUC stayed at 1.0. Leakage between fit and validation was therefore not the cause of the extreme threshold; see D-019 for the cause.
+Alternatives: random slice (rejected: leaks neighbors), newest slice (rejected: 11 positives).
+Consequences: validation contains only attack families seen in training, so recall on unseen families at the stored threshold can be low; E1 reports it per family.
+
+## D-019: Model capacity chosen so the threshold keeps headroom below 1.0
+Status: accepted (2026-10-15)
+Context: with 400 trees, seen attackers score within about 3e-6 of 1.0, so the threshold that reaches recall 0.95 sits in a saturated tail. A seen family (SSH-Patator) with median 1 minus score of 5e-6 fell just past it and had recall 0.000, while a 100-tree model recovered it. The stored threshold was brittle to score shifts far smaller than any real drift. This was found by inspecting E1 output, which included test-day per-family recall, so the investigation saw test data.
+Decision: choose `n_estimators` by a criterion fixed before the final choice and evaluated on validation only: the largest of {50, 100, 150, 200, 300, 400} (learning rate 0.05) whose blocked-validation threshold has at least 1e-3 of headroom below 1.0. That is 100 (headroom 5.5e-3; 150 trees gives 4.9e-4). Training also records `threshold_headroom` and logs a warning below 1e-3.
+Alternatives: keep 400 trees and report the brittle operating point (rejected: the per-family recall would reflect float saturation, not the model), calibrate scores after training (rejected: adds a stage with no spec support), choose the count from test-day recall (rejected: tuning on the evaluation).
+Consequences: validation ranking is unchanged (PR-AUC about 1.0); the contamination caveat above is disclosed in the README limitations.
 
 ## D-017: Load-test switch for stream features
 Status: accepted (2026-10-14)

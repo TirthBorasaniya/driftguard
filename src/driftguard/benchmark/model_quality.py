@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -23,8 +24,34 @@ DATASET = "cicids2017"
 # ============= Splits =============
 
 
+def blocked_validation_mask(n_rows: int, block_size: int, fraction: float) -> np.ndarray:
+    """
+    Mask of validation rows when whole contiguous blocks of the stream are held out.
+
+    Every k-th block (k = round(1 / fraction)) is validation. Flows inside one attack campaign are
+    near-duplicates of their temporal neighbors, so a random slice puts neighbors of every fit row
+    into validation and makes it look perfect; holding out whole blocks removes that adjacency.
+
+    Parameters
+    ----------
+    n_rows : int
+        Number of training rows, in stream order.
+    block_size : int
+        Rows per block.
+    fraction : float
+        Approximate validation share.
+
+    Returns
+    -------
+    mask : np.ndarray
+        Boolean array of shape (n_rows,).
+    """
+    every = max(2, round(1.0 / fraction))
+    return (np.arange(n_rows) // int(block_size)) % every == every - 1
+
+
 def split_validation(
-    frame: pd.DataFrame, method: str, fraction: float, seed: int
+    frame: pd.DataFrame, method: str, fraction: float, seed: int, block_size: int = 5000
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Split a training portion into fit and threshold-validation parts.
@@ -32,21 +59,29 @@ def split_validation(
     Parameters
     ----------
     frame : pd.DataFrame
-        Training portion, in event-time order.
+        Training portion; rows are put back in stream order (by index) before blocking.
     method : str
-        `random_stratified` or `tail` (the newest `fraction` by event time).
+        `blocked` (whole contiguous blocks), `tail` (the newest `fraction` by event time), or
+        `random_stratified` (kept for comparison; leaks temporal neighbors).
     fraction : float
         Validation share.
     seed : int
         Seed for the stratified split.
+    block_size : int
+        Rows per block for `blocked`.
 
     Returns
     -------
     fit, validation : tuple of pd.DataFrame
     """
+    if method == "blocked":
+        ordered = frame.sort_index()
+        mask = blocked_validation_mask(len(ordered), block_size, fraction)
+        return ordered.loc[~mask], ordered.loc[mask]
     if method == "tail":
-        cut = int(len(frame) * (1 - fraction))
-        return frame.iloc[:cut], frame.iloc[cut:]
+        ordered = frame.sort_index()
+        cut = int(len(ordered) * (1 - fraction))
+        return ordered.iloc[:cut], ordered.iloc[cut:]
     if method == "random_stratified":
         fit, val = train_test_split(
             frame, test_size=fraction, stratify=frame["label"], random_state=seed
@@ -101,7 +136,13 @@ def run_protocol(
         Row counts, `scale_pos_weight`, `threshold`, validation metrics, and test metrics.
     """
     seed = int(model_config["seed"])
-    fit, val = split_validation(train, validation["method"], float(validation["fraction"]), seed)
+    fit, val = split_validation(
+        train,
+        validation["method"],
+        float(validation["fraction"]),
+        seed,
+        int(validation.get("block_size", 5000)),
+    )
     model, spw = train_model(
         model_matrix(fit, features), fit["label"].to_numpy(), model_config["lightgbm"], seed
     )

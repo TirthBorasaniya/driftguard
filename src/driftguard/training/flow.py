@@ -22,7 +22,13 @@ from driftguard.common.mlflow_client import (
 )
 from driftguard.training.evaluate import evaluate_scores
 from driftguard.training.export import onnx_scores, onnx_session, parity_check, to_onnx_bytes
-from driftguard.training.train import predict_scores, select_threshold, train_model
+from driftguard.training.train import (
+    MIN_THRESHOLD_HEADROOM,
+    predict_scores,
+    select_threshold,
+    threshold_headroom,
+    train_model,
+)
 from driftguard.training.window import WindowSplits, data_hash
 
 # ============= Constants =============
@@ -92,6 +98,9 @@ def train_and_package(
     threshold = select_threshold(
         splits.validation["label"].to_numpy(), val_scores, float(model_config["target_recall"])
     )
+    headroom = threshold_headroom(threshold)
+    if headroom < MIN_THRESHOLD_HEADROOM:
+        logger.warning("threshold_saturated", threshold=threshold, headroom=headroom)
     onnx_cfg = model_config["onnx"]
     payload = to_onnx_bytes(
         model, len(features), int(onnx_cfg["split"]), int(onnx_cfg["target_opset"])
@@ -115,9 +124,10 @@ def train_and_package(
         threshold=threshold,
         scale_pos_weight=spw,
         parity_max_abs_diff=observed,
-        validation_metrics=evaluate_scores(
-            splits.validation["label"].to_numpy(), val_scores, threshold
-        ),
+        validation_metrics={
+            **evaluate_scores(splits.validation["label"].to_numpy(), val_scores, threshold),
+            "threshold_headroom": headroom,
+        },
         reference=reference.reset_index(drop=True),
         params={**model_config["lightgbm"], "seed": seed, "scale_pos_weight": spw},
     )

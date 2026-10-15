@@ -25,9 +25,26 @@ def main() -> None:
     """Run E1 and write its results file."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument(
+        "--skip-stream-ablation",
+        action="store_true",
+        dest="o_skip_stream",
+        help="omit the Redis-backed stream-feature ablation (recorded in notes)",
+    )
     args = parser.parse_args()
     configure_logging("eval-e1")
     config = load_config(args.config)
+    notes = NOTES
+    if args.o_skip_stream:
+        config = type(config)(
+            path=config.path,
+            sha256=config.sha256,
+            data={**config.data, "ablations": {**config["ablations"], "o_stream_features": False}},
+        )
+        notes += (
+            " The stream-feature ablation was skipped for this run (--skip-stream-ablation, "
+            "no Redis available); rerun without the flag to add it."
+        )
 
     stream_feature_fn = None
     if config["ablations"].get("o_stream_features"):
@@ -35,7 +52,7 @@ def main() -> None:
 
         stream_feature_fn = redis_replay_features
     metrics = run_e1(config, stream_feature_fn)
-    print(f"Wrote {write_results('e1_model_quality', metrics, args.config, notes=NOTES)}")
+    print(f"Wrote {write_results('e1_model_quality', metrics, args.config, notes=notes)}")
 
 
 if __name__ == "__main__":

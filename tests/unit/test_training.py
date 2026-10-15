@@ -75,3 +75,27 @@ def test_evaluate_scores_and_family_recall():
         "DDoS": {"recall": 1.0, "n": 2},
     }
     assert per_family_recall(y, (scores >= 0.5).astype(int), families)["DDoS"]["n"] == 2
+
+
+def test_threshold_headroom_flags_saturated_operating_points():
+    from driftguard.training.train import MIN_THRESHOLD_HEADROOM, threshold_headroom
+
+    assert threshold_headroom(0.9) == pytest.approx(0.1)
+    assert threshold_headroom(0.9999977) < MIN_THRESHOLD_HEADROOM
+    assert threshold_headroom(0.9945) > MIN_THRESHOLD_HEADROOM
+
+
+def test_configured_model_is_not_saturated_on_stereotyped_attacks():
+    """Regression: 400 trees pushed seen attackers within 3e-6 of 1.0 and made recall brittle."""
+    from driftguard.common.config import load_config
+    from driftguard.training.train import MIN_THRESHOLD_HEADROOM, threshold_headroom
+
+    params = load_config("configs/model.yaml")["lightgbm"]
+    assert params["n_estimators"] <= 100
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(20_000, 6)).astype(np.float32)
+    y = (x[:, 0] + 0.3 * rng.normal(size=20_000) > 1.0).astype(int)
+    model, _ = train_model(x[:16_000], y[:16_000], {**params, "n_jobs": 1}, seed=1)
+    scores = model.predict_proba(x[16_000:])[:, 1]
+    threshold = select_threshold(y[16_000:], scores, 0.95)
+    assert threshold_headroom(threshold) > MIN_THRESHOLD_HEADROOM

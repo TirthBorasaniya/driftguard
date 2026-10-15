@@ -17,7 +17,7 @@ run" has no measured value. CI fails if these tables differ from what the render
 | Guarantee | Measured result | Evidence |
 |---|---|---|
 | Sustained ingestion and p99 latency, with and without retraining | not yet run (`make loadtest`) | `results/e3_load.json` |
-| Precision and recall at target recall, time-ordered | not yet run (`make eval-e1`) | `results/e1_model_quality.json` |
+| Precision and recall at target recall, time-ordered | time-ordered PR-AUC 0.9399, precision n/a at recall 0.0000 (target 0.95) | `results/e1_model_quality.json` |
 <!-- results:headline:end -->
 
 ## Architecture
@@ -138,7 +138,35 @@ a random stratified split is an upper-bound reference only. Ablations drop `dst_
 CICFlowMeter features with and without the behavioral features. Reproduce with `make eval-e1`.
 
 <!-- results:e1_model_quality:start -->
-Not yet run. Reproduce with `make eval-e1`.
+| Protocol | PR-AUC | ROC-AUC | Precision @ thr | Recall @ thr | Threshold | Precision @ recall 0.99 | Test rows |
+|---|---|---|---|---|---|---|---|
+| Time-ordered (train Mon-Wed, test Thu-Fri) | 0.9399 | 0.9670 | n/a | 0.0000 | 0.9945 | 0.7718 | 909,632 |
+| Within-day temporal split | 0.9999 | 1.0000 | 1.0000 | 0.3344 | 0.9947 | 0.9995 | 629,994 |
+| Random stratified (upper-bound reference only) | 1.0000 | 1.0000 | 1.0000 | 0.9509 | 0.9948 | 1.0000 | 629,992 |
+
+Per-family recall at the stored threshold (time-ordered test days):
+
+| Family | Recall | Test rows |
+|---|---|---|
+| Botnet | 0.0000 | 736 |
+| DDoS | 0.0000 | 95,144 |
+| Infiltration | 0.0000 | 36 |
+| Infiltration - Portscan | 0.0000 | 71,767 |
+| Portscan | 0.0000 | 159,066 |
+| Web Attack - Brute Force | 0.0000 | 73 |
+| Web Attack - SQL Injection | 0.0000 | 13 |
+| Web Attack - XSS | 0.0000 | 18 |
+
+Ablations (time-ordered protocol):
+
+| Protocol | PR-AUC | ROC-AUC | Precision @ thr | Recall @ thr | Threshold | Precision @ recall 0.99 | Test rows |
+|---|---|---|---|---|---|---|---|
+| Without dst_port | 0.8355 | 0.8699 | n/a | 0.0000 | 0.9944 | 0.6454 | 909,632 |
+| attempted_policy=benign | 0.9399 | 0.9670 | n/a | 0.0000 | 0.9945 | 0.7718 | 909,632 |
+| attempted_policy=attack | 0.9615 | 0.9812 | n/a | 0.0000 | 0.9944 | 0.9315 | 909,632 |
+| attempted_policy=drop | 0.9436 | 0.9688 | n/a | 0.0000 | 0.9945 | 0.7854 | 903,568 |
+
+_Source: `results/e1_model_quality.json`, run `2026-10-15T21-09-52Z_e1_model_quality`, git `cb21ee8`, hardware: arm, 10 logical CPUs._
 <!-- results:e1_model_quality:end -->
 
 ### E2 Drift detection benchmark
@@ -197,7 +225,15 @@ labeled events: clearly better (trained on post-drift data), equal (same data an
 Reproduce with `make eval-e5`.
 
 <!-- results:e5_gate:start -->
-Not yet run. Reproduce with `make eval-e5`.
+3,000 shadow events (284 attacks), margin 0.01, 1,000 paired resamples.
+
+| Challenger | Expected | Decision | Delta PR-AUC | 95% CI | Matches |
+|---|---|---|---|---|---|
+| better | promote | promote | 0.7980 | [0.7677, 0.8276] | yes |
+| equal | decline | decline | 0.0000 | [0.0000, 0.0000] | yes |
+| worse | decline | decline | -0.1481 | [-0.1747, -0.1219] | yes |
+
+_Source: `results/e5_gate.json`, run `2026-10-15T21-12-17Z_e5_gate`, git `cb21ee8`, hardware: arm, 10 logical CPUs._
 <!-- results:e5_gate:end -->
 
 ### First version (historical, transcribed)
@@ -241,6 +277,9 @@ Feast `PushSource` (D-006).
   precision at recall 0.99 for every protocol so the figure can be matched to a split.
 - The initial champion is the only model that serves without passing the gate, because there is no
   incumbent to compare it against.
+- The model capacity (100 trees) was chosen by a validation-only criterion after an E1 diagnostic
+  that looked at test-day per-family recall, so E1's test numbers are not perfectly untouched by
+  that investigation (DECISIONS D-019).
 - Shadow pairs are held in the rollout controller's memory; a restart during shadow evaluation
   restarts the collection.
 - Idempotency keys expire after 48 h, so a replay older than that can be scored again.

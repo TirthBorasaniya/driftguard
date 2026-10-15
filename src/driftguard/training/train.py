@@ -103,3 +103,18 @@ def select_threshold(y: np.ndarray, scores: np.ndarray, target_recall: float) ->
         raise ValueError("validation slice has no positive labels")
     k = math.ceil(target_recall * positive_scores.size - 1e-12)
     return float(positive_scores[k - 1])
+
+
+# ============= Operating point health =============
+
+MIN_THRESHOLD_HEADROOM = 1e-3
+
+
+def threshold_headroom(threshold: float) -> float:
+    """
+    Distance of the decision threshold below 1.0.
+
+    A recall-targeted threshold within about 1e-3 of 1.0 means seen attacks are scored in a
+    saturated tail, where tiny score shifts flip recall from high to zero.
+    """
+    return 1.0 - float(threshold)

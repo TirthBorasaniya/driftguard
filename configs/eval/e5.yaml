@@ -5,10 +5,10 @@ dataset: cicids2017
 model_config: configs/model.yaml
 rollout_config: configs/rollout.yaml
 champion_days: [monday, tuesday]
-# drift arrives on this day; it is split at random into a training half and an evaluation pool
+# drift arrives on this day; its older part trains the better challenger and its newer part is the
+# evaluation pool (time-ordered split)
 post_drift_days: [wednesday]
 post_drift_train_fraction: 0.5
-split_seed: 11
 shadow_sample_seed: 13
 label_shuffle_seed: 17
 expected: {better: promote, equal: decline, worse: decline}

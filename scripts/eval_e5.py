@@ -12,9 +12,11 @@ from driftguard.common.settings import REPO_ROOT
 
 DEFAULT_CONFIG = REPO_ROOT / "configs" / "eval" / "e5.yaml"
 NOTES = (
-    "Champion trained on Monday and Tuesday. Challengers: better (adds half of Wednesday, the "
-    "post-drift day), equal (same data and seed), worse (shuffled labels). All are compared on the "
-    "same 3,000 Wednesday events from the other half with 1,000 paired bootstrap resamples."
+    "Champion trained on Monday and Tuesday. Challengers: better (adds the older half of "
+    "Wednesday, the post-drift day), equal (same data and seed), worse (shuffled labels). All are "
+    "compared on the same 3,000 events sampled from the newer half of Wednesday with 1,000 "
+    "paired bootstrap resamples. Attack campaigns span both halves of the day, so the better "
+    "challenger's near-perfect PR-AUC reflects that overlap."
 )
 
 
