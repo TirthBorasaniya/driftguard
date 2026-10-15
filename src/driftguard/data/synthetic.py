@@ -22,6 +22,7 @@ def synthetic_flows(
     seed: int = 42,
     start_time_ms: int = 1_499_083_200_000,
     step_ms: int = 5,
+    id_tag: str = "",
 ) -> pd.DataFrame:
     """
     Generate synthetic flows that follow the dataset's flow schema.
@@ -44,6 +45,8 @@ def synthetic_flows(
         Event time of the first row.
     step_ms : int
         Event-time spacing between rows.
+    id_tag : str
+        Extra namespace for event ids so repeated test runs do not collide on idempotency keys.
 
     Returns
     -------
@@ -60,7 +63,7 @@ def synthetic_flows(
     row_index = np.arange(n_events, dtype=np.int64)
     meta = pd.DataFrame(
         {
-            "event_id": make_event_ids(f"{dataset}-synthetic", SYNTHETIC_FILE, row_index),
+            "event_id": make_event_ids(f"{dataset}-synthetic{id_tag}", SYNTHETIC_FILE, row_index),
             "dataset": dataset,
             "source_file": SYNTHETIC_FILE,
             "row_index": row_index,

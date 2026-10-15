@@ -1,0 +1,10 @@
+# Retraining flow and orchestrator configuration (SPEC 6).
+version: 1
+deployment: retrain/retrain-on-drift
+train_window_labeled: 60000
+holdout_fraction: 0.2
+# threshold-selection slice taken from the end of the training portion
+validation_fraction: 0.1
+reference_max_rows: 50000
+min_holdout_positives: 20
+status_poll_s: 30

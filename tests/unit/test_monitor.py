@@ -1,0 +1,261 @@
+"""Tests for PSI, windows, the drift policy, detectors, and the monitor core."""
+
+import fakeredis
+import numpy as np
+import pandas as pd
+import pytest
+
+from driftguard.common.config import load_config
+from driftguard.monitor.detectors import AdwinErrorDetector, KswinScoreDetector, ScorePsi
+from driftguard.monitor.main import PAUSE_KEY, PAUSED_BY_DATA_QUALITY, MonitorCore
+from driftguard.monitor.policy import DriftPolicy
+from driftguard.monitor.psi import PsiProfile, bin_counts, compute_bin_edges, compute_psi
+from driftguard.monitor.reference import build_reference
+from driftguard.monitor.windows import CountWindows, MonthWindows, month_id
+
+pytestmark = pytest.mark.unit
+
+
+def policy_config(**overrides):
+    config = dict(load_config("configs/drift_policy.yaml").data)
+    config.update(overrides)
+    return config
+
+
+# ----- PSI -----
+
+
+def test_psi_identical_is_zero_and_known_value():
+    assert compute_psi(np.array([10, 20, 30]), np.array([10, 20, 30])) == 0.0
+    ref, cur = np.array([50, 50]), np.array([25, 75])
+    expected = (0.25 - 0.5) * np.log(0.25 / 0.5) + (0.75 - 0.5) * np.log(0.75 / 0.5)
+    assert compute_psi(ref, cur) == pytest.approx(expected)
+
+
+def test_psi_floor_handles_empty_bins():
+    value = compute_psi(np.array([100, 0]), np.array([0, 100]))
+    assert np.isfinite(value) and value > 10
+
+
+def test_bin_edges_quantiles_and_outside_values():
+    ref = np.arange(1000, dtype=float)
+    edges = compute_bin_edges(ref, 10)
+    assert len(edges) == 11
+    counts = bin_counts(np.array([-1e9, 1e9, 500.0]), edges)
+    assert counts[0] == 1 and counts[-1] == 1 and counts.sum() == 3
+
+
+def test_discrete_feature_collapses_bins_and_constant_is_zero():
+    ref = np.repeat([0.0, 1.0, 2.0], 100)
+    assert len(compute_bin_edges(ref, 10)) <= 4
+    constant = np.full(100, 3.0)
+    profile = PsiProfile.fit(constant[:, None], ["c"])
+    assert profile.feature_psi(np.full((50, 1), 7.0))[0] == 0.0
+
+
+def test_shifted_distribution_raises_psi():
+    rng = np.random.default_rng(0)
+    profile = PsiProfile.fit(rng.normal(size=(5000, 2)), ["a", "b"])
+    same = profile.feature_psi(rng.normal(size=(5000, 2)))
+    shifted = profile.feature_psi(rng.normal(loc=1.0, size=(5000, 2)))
+    assert same.max() < 0.05 and shifted.min() > 0.25
+
+
+# ----- windows -----
+
+
+def test_count_windows_close_when_both_streams_full():
+    windows = CountWindows(size=3)
+    windows.add_flows([(i, [float(i)]) for i in range(7)])
+    assert windows.ready() == []
+    windows.add_scores([(i, 0.1) for i in range(6)])
+    closed = windows.ready()
+    assert [w.window_id for w in closed] == ["window_00000", "window_00001"]
+    assert closed[1].features[:, 0].tolist() == [3.0, 4.0, 5.0]
+
+
+def test_month_windows_close_after_later_events_and_count_late():
+    jan, feb = 1_136_073_600_000, 1_138_752_000_000  # 2006-01-01, 2006-02-01 UTC
+    assert month_id(jan) == "2006-01" and month_id(feb) == "2006-02"
+    windows = MonthWindows(close_after=2)
+    windows.add_flows([(jan, [1.0]), (jan, [2.0])])
+    windows.add_scores([(jan, 0.1), (jan, 0.2)])
+    windows.add_flows([(feb, [3.0])])
+    windows.add_scores([(feb, 0.3)])
+    assert windows.ready() == []
+    windows.add_flows([(feb, [4.0])])
+    windows.add_scores([(feb, 0.4)])
+    closed = windows.ready()
+    assert [w.window_id for w in closed] == ["2006-01"] and len(closed[0].scores) == 2
+    windows.add_flows([(jan, [9.0])])
+    assert windows.late_events == 1
+
+
+# ----- policy -----
+
+
+FLAG = {"psi_max": 0.3, "psi_share": 0.0, "drift_share": 0.0, "score_psi": 0.0}
+CLEAN = {"psi_max": 0.01, "psi_share": 0.0, "drift_share": 0.0, "score_psi": 0.0}
+
+
+def test_policy_debounce_requires_consecutive_flags():
+    policy = DriftPolicy(policy_config())
+    policy.add_labels(5000)
+    assert not policy.evaluate("w0", FLAG, True).emit
+    assert not policy.evaluate("w1", CLEAN, True).emit
+    assert "debounce" in policy.evaluate("w2", FLAG, True).blocked_by
+    decision = policy.evaluate("w3", FLAG, True)
+    assert decision.emit and decision.severity == "LOW"
+
+
+def test_policy_min_labeled_and_cooldown():
+    policy = DriftPolicy(policy_config())
+    policy.evaluate("w0", FLAG, True)
+    assert "min_labeled" in policy.evaluate("w1", FLAG, True).blocked_by
+    policy.add_labels(2000)
+    assert policy.evaluate("w2", FLAG, True).emit
+    blocked = [policy.evaluate(f"w{i}", FLAG, True) for i in range(3, 6)]
+    assert all("cooldown" in d.blocked_by for d in blocked)
+    assert policy.evaluate("w6", FLAG, True).emit
+
+
+def test_policy_promotion_resets_and_gx_failure_never_emits():
+    policy = DriftPolicy(policy_config())
+    policy.add_labels(10_000)
+    policy.note_promotion()
+    assert policy.labeled_since_promotion == 0
+    policy.add_labels(10_000)
+    for i in range(3):
+        policy.evaluate(f"c{i}", CLEAN, True)
+    policy.evaluate("w0", FLAG, True)
+    decision = policy.evaluate("w1", FLAG, False)
+    assert decision.data_quality_failed and not decision.emit
+    assert policy.consecutive == 0
+
+
+def test_policy_severity_high_on_adwin_or_large_psi():
+    policy = DriftPolicy(policy_config())
+    assert policy.severity({"psi_max": 0.6}) == "HIGH"
+    assert policy.severity({"psi_max": 0.1, "adwin_error": 1.0}) == "HIGH"
+    assert policy.severity({"psi_max": 0.3}) == "LOW"
+    assert policy.flag_reasons({"kswin_score": 1.0, "psi_max": 0.0}) == ["kswin_score"]
+
+
+# ----- detectors -----
+
+
+def test_adwin_detects_error_rate_step():
+    detector = AdwinErrorDetector(0.002)
+    rng = np.random.default_rng(1)
+    assert detector.update((rng.random(2000) < 0.02).astype(int).tolist()) == 0
+    assert detector.update((rng.random(2000) < 0.5).astype(int).tolist()) >= 1
+    assert detector.consume() == 1.0 and detector.consume() == 0.0
+
+
+def test_kswin_detects_score_shift_and_not_stationary():
+    rng = np.random.default_rng(2)
+    stationary = KswinScoreDetector(0.005, 500, 100, seed=1)
+    signal, _ = stationary.window_signal(rng.beta(2, 8, 600))
+    shifted = KswinScoreDetector(0.005, 500, 100, seed=1)
+    shifted.window_signal(rng.beta(2, 8, 600))
+    shifted_signal, detections = shifted.window_signal(rng.beta(8, 2, 600))
+    assert shifted_signal == 1.0 and detections >= 1
+    assert signal in (0.0, 1.0)
+
+
+def test_score_psi():
+    rng = np.random.default_rng(3)
+    scorer = ScorePsi(rng.beta(2, 8, 5000))
+    assert scorer.psi(rng.beta(2, 8, 5000)) < 0.05
+    assert scorer.psi(rng.beta(8, 2, 5000)) > 0.2
+
+
+# ----- monitor core -----
+
+
+class FakeGX:
+    def __init__(self, ok):
+        self.ok = ok
+
+    def validate(self, frame):
+        from driftguard.training.validate import ValidationReport
+
+        return ValidationReport(self.ok, [] if self.ok else ["x"], 1)
+
+
+def _core(gx_ok=True, window_size=200):
+    from driftguard.data.registry import feature_names
+
+    names = feature_names("cicids2017")
+    rng = np.random.default_rng(0)
+    ref = pd.DataFrame(rng.lognormal(size=(2000, len(names))), columns=names)
+    ref["score"] = rng.beta(2, 8, 2000)
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    core = MonitorCore(
+        "cicids2017", policy_config(window_size=window_size, min_labeled=0), redis, FakeGX(gx_ok)
+    )
+    core.set_reference(build_reference("1", ref, names, 10, 500), o_promotion=False)
+    return core, names, redis
+
+
+def _flows(names, n, loc, seed):
+    rng = np.random.default_rng(seed)
+    values = rng.lognormal(mean=loc, size=(n, len(names)))
+    return [
+        {
+            "event_id": f"e{seed}-{i}",
+            "event_time": i,
+            **{name: float(values[i, j]) for j, name in enumerate(names)},
+        }
+        for i in range(n)
+    ]
+
+
+def _preds(flows, score):
+    return [
+        {"event_id": f["event_id"], "event_time": f["event_time"], "score": score, "decision": 0}
+        for f in flows
+    ]
+
+
+def test_monitor_emits_event_after_debounced_shift():
+    core, names, _ = _core()
+    events = []
+    for k in range(4):
+        flows = _flows(names, 200, 3.0, k)
+        events += core.on_flows(flows) + core.on_predictions(_preds(flows, 0.9))
+    assert len(events) == 1
+    event = events[0]
+    assert event["severity"] == "HIGH" and event["policy_version"] == 3
+    assert event["signals"]["psi_max"] > 0.5 and "window_end_ms" in event
+
+
+def test_monitor_pauses_on_gx_failure_and_resumes_on_clean_window():
+    core, names, redis = _core(gx_ok=False)
+    flows = _flows(names, 200, 0.0, 9)
+    core.on_flows(flows)
+    core.on_predictions(_preds(flows, 0.1))
+    assert redis.get(PAUSE_KEY.format(dataset="cicids2017")) == PAUSED_BY_DATA_QUALITY
+    core.gx = FakeGX(True)
+    flows = _flows(names, 200, 0.0, 10)
+    core.on_flows(flows)
+    core.on_predictions(_preds(flows, 0.1))
+    assert redis.get(PAUSE_KEY.format(dataset="cicids2017")) is None
+
+
+def test_operator_pause_is_not_lifted():
+    core, names, redis = _core()
+    redis.set(PAUSE_KEY.format(dataset="cicids2017"), "operator")
+    flows = _flows(names, 200, 0.0, 11)
+    core.on_flows(flows)
+    core.on_predictions(_preds(flows, 0.1))
+    assert redis.get(PAUSE_KEY.format(dataset="cicids2017")) == "operator"
+
+
+def test_labels_join_predictions_for_adwin():
+    core, names, _ = _core()
+    flows = _flows(names, 10, 0.0, 12)
+    core.on_predictions(_preds(flows, 0.1))
+    core.on_labels([{"event_id": f["event_id"], "label": 1} for f in flows])
+    assert core.policy.labeled_since_promotion == 10
+    assert not core._pending_predictions and not core._pending_labels

@@ -56,3 +56,30 @@ eval-e1:
 
 producer:
 	$(PY) -m driftguard.producer.replay
+
+.PHONY: up down logs bootstrap bootstrap-synthetic fit-gx-bounds test-integration replay
+
+up:
+	./scripts/check_stack_free.sh compose
+	docker compose up -d --build --wait
+
+down:
+	docker compose --profile replay --profile tools down
+
+logs:
+	docker compose logs -f --tail=200
+
+bootstrap:
+	docker compose run --rm bootstrap python scripts/bootstrap.py --dataset $(or $(DATASET),cicids2017)
+
+bootstrap-synthetic:
+	docker compose run --rm bootstrap python scripts/bootstrap.py --source synthetic
+
+fit-gx-bounds:
+	$(PY) scripts/fit_gx_bounds.py --dataset $(or $(DATASET),cicids2017)
+
+test-integration:
+	$(UV) run pytest -m integration tests/integration
+
+replay:
+	docker compose run --rm producer python -m driftguard.producer.replay $(ARGS)

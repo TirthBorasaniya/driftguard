@@ -1,0 +1,17 @@
+# Drift decision policy (SPEC 5.3, 12). Versioned; drift events carry policy_version.
+version: 3
+window_size: 5000
+debounce_windows: 2
+cooldown_windows: 3
+min_labeled: 2000
+thresholds: {psi_max: 0.25, psi_share: 0.30, drift_share: 0.50, score_psi: 0.20}
+psi_share_feature_threshold: 0.2
+psi_bins: 10
+psi_floor: 1.0e-6
+adwin: {delta: 0.002}
+kswin: {alpha: 0.005, window_size: 500, stat_size: 100}
+severity_high: {psi_max: 0.5, adwin: true}
+# Kyoto uses calendar-month windows; a month closes after this many later events in both streams
+month_close_after_events: 1000
+# Evidently compares at most this many rows per side to bound per-window cost
+evidently_max_rows: 5000

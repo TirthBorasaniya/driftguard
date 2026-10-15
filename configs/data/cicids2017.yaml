@@ -63,6 +63,16 @@ excluded_columns: [row_id, flow_id, src_ip, src_port, dst_ip, timestamp, label, 
 stream_features:
   enabled: true
 
+# monitor windows (SPEC 5.1) and Great Expectations settings (SPEC 5.2, 6.2); bounds are fitted
+# once by scripts/fit_gx_bounds.py into configs/data/cicids2017_gx_bounds.json
+monitor_windows: count
+gx:
+  mostly: 0.99
+  min_window_rows: 100
+  min_training_rows: 10000
+  # initial reference data the bounds are fitted on: the initial training days
+  reference_days: [monday, tuesday]
+
 # model features: snake_case name, column in each source (null when absent), schema-level bounds
 # used by the consumer's validation step (physical limits, not fitted percentiles)
 features:

@@ -1,0 +1,17 @@
+.git
+.venv
+.venv*
+.cache
+.tmp
+.kube
+.planning
+.claude
+CLAUDE.md
+.env
+data
+models
+mlruns
+reports
+notebooks
+results
+**/__pycache__

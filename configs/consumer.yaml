@@ -1,0 +1,28 @@
+# Scoring consumer configuration (SPEC 4.1).
+version: 1
+group_id: driftguard-scoring
+max_poll_records: 500
+poll_timeout_s: 1.0
+idempotency:
+  key_prefix: "dg:seen:"
+  ttl_s: 172800
+  # a claim left "pending" by a dead consumer is reclaimed after this lease
+  lease_s: 30
+  wait_poll_s: 0.5
+scoring:
+  batch_size: 256
+  timeout_s: 2.0
+  retries: 3
+  backoff_base_s: 0.2
+  backoff_max_s: 2.0
+  shadow_timeout_s: 2.0
+feast:
+  online_write: true
+offline_sink:
+  enabled: true
+label_sink:
+  enabled: true
+  group_id: driftguard-label-sink
+  flush_rows: 20000
+  flush_s: 10
+lag_refresh_s: 5

@@ -1,0 +1,17 @@
+# Prefect 3 deployment for asynchronous retraining (SPEC 6.1).
+name: driftguard
+prefect-version: 3.4.25
+
+pull:
+  - prefect.deployments.steps.set_working_directory:
+      directory: /app
+
+deployments:
+  - name: retrain-on-drift
+    entrypoint: flows/retrain.py:retrain_on_drift
+    work_pool:
+      name: driftguard-process
+    # overlapping drift events never stack runs: a new run is cancelled while one is active
+    concurrency_limit:
+      limit: 1
+      collision_strategy: CANCEL_NEW

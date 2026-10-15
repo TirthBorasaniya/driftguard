@@ -1,0 +1,11 @@
+# Initial champion per dataset (trained once before streaming starts). Its training window is the
+# initial drift reference and the data the GX bounds are fitted on.
+version: 1
+cicids2017:
+  # Monday is benign-only, so the first attack day is included to give the model positives
+  train_days: [monday, tuesday]
+kyoto:
+  train_years: [2006, 2007]
+holdout_fraction: 0.2
+validation_fraction: 0.1
+reference_max_rows: 50000

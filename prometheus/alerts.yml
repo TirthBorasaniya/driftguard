@@ -1,0 +1,17 @@
+groups:
+  - name: latency_slo
+    rules:
+      - alert: ScoringLatencyP95Breach
+        expr: histogram_quantile(0.95, sum by (le, dataset) (rate(driftguard_scoring_latency_seconds_bucket[5m]))) > 0.025
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 scoring latency above 25 ms per batch for {{ $labels.dataset }}"
+      - alert: ScoringLatencyP99Breach
+        expr: histogram_quantile(0.99, sum by (le, dataset) (rate(driftguard_scoring_latency_seconds_bucket[5m]))) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "p99 scoring latency above the 50 ms per-batch SLO for {{ $labels.dataset }}"
