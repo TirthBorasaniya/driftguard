@@ -52,19 +52,28 @@ def test_gate_decisions():
 
 def test_guardrail_evaluation_and_queries():
     rails = {"p99_latency_ms": 50, "error_rate": 0.005, "positive_rate_ratio": [0.5, 1.5]}
-    assert (
-        evaluate_guardrails(
-            {"p99_latency_s": 0.01, "error_rate": 0.0, "positive_rate_ratio": 1.0}, rails
-        )
-        == []
+    ok = {"p99_latency_s": 0.01, "error_rate": 0.0, "positive_rate_ratio": 1.0}
+    assert evaluate_guardrails(ok, rails) == ([], [])
+    bad = {"p99_latency_s": 0.06, "error_rate": 0.01, "positive_rate_ratio": 2.0}
+    assert evaluate_guardrails(bad, rails) == (
+        ["p99_latency", "error_rate", "positive_rate_ratio"],
+        [],
     )
-    assert evaluate_guardrails(
-        {"p99_latency_s": 0.06, "error_rate": 0.01, "positive_rate_ratio": 2.0}, rails
-    ) == ["p99_latency", "error_rate", "positive_rate_ratio"]
-    assert evaluate_guardrails({"p99_latency_s": None, "error_rate": float("nan")}, rails) == []
     queries = guardrail_queries("cicids2017", "2m")
     assert 'alias="challenger"' in queries["positive_rate_ratio"]
     assert "histogram_quantile(0.99" in queries["p99_latency_s"]
+    assert "or vector(0)" in queries["error_rate"]
+
+
+def test_missing_guardrail_data_is_missing_not_a_pass():
+    """Regression (M1): None and NaN used to count as 'not breached'."""
+    rails = {"p99_latency_ms": 50, "error_rate": 0.005, "positive_rate_ratio": [0.5, 1.5]}
+    values = {"p99_latency_s": None, "error_rate": float("nan"), "positive_rate_ratio": 1.0}
+    assert evaluate_guardrails(values, rails) == ([], ["p99_latency", "error_rate"])
+    assert evaluate_guardrails({}, rails) == (
+        [],
+        ["p99_latency", "error_rate", "positive_rate_ratio"],
+    )
 
 
 def _controller(tmp_path, values=None, min_labeled=500, canary_min=100):
@@ -170,3 +179,31 @@ def test_shadow_pairs_ignore_stale_challenger_versions(tmp_path):
     y, champion = _scores(n=600)
     _feed(controller, y, champion, champion, version="old")
     assert controller.labeled == [] and controller.step() is None
+
+
+def _canary_controller(tmp_path, values):
+    controller, registry, redis = _controller(tmp_path, values=values, canary_min=100)
+    redis.set("dg:rollout:cicids2017", "canary")
+    controller.canary_events = 150
+    return controller, registry, redis
+
+
+def test_canary_never_promotes_without_guardrail_evidence(tmp_path):
+    """Regression (M1): Prometheus down used to promote after canary_min_events."""
+    controller, registry, redis = _canary_controller(tmp_path, values={})
+    assert controller.step() is None  # first check: data missing, no promotion
+    assert registry.get_alias(NAME, CHAMPION).version == "1"
+    assert registry.get_alias(NAME, CHALLENGER) is not None
+    assert redis.get("dg:rollout:cicids2017") == "canary"
+
+
+def test_canary_rolls_back_after_repeated_missing_guardrail_data(tmp_path):
+    controller, registry, redis = _canary_controller(tmp_path, values={})
+    controller.config = {**controller.config, "guardrail_max_missing_checks": 2}
+    controller.canary_events = 0
+    records = [controller.step() for _ in range(4)]
+    rolled = next(r for r in records if r)
+    assert rolled["action"] == "canary_rolled_back"
+    assert rolled["breaches"] == ["guardrail_data_unavailable"]
+    assert registry.get_alias(NAME, CHALLENGER) is None
+    assert redis.get("dg:rollout:cicids2017") == "champion_only"

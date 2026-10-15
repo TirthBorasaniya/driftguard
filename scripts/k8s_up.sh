@@ -54,9 +54,13 @@ kubectl apply -f deploy/k8s/strimzi/kafka.yaml
 kubectl wait kafka/driftguard -n driftguard --for=condition=Ready --timeout=10m
 kubectl apply -f deploy/k8s/strimzi/topics.yaml
 
+# no --wait: serving readiness needs the champion that the bootstrap Job creates, so waiting here
+# would deadlock; wait for the Job first and then for every Deployment
 helm install driftguard deploy/k8s/charts/driftguard --namespace driftguard \
   -f deploy/k8s/values-kind.yaml \
   --set secrets.adminToken="${ADMIN_TOKEN}" --set secrets.ipHashSalt="${IP_HASH_SALT}" \
-  --wait --timeout 20m
+  --timeout 5m
 kubectl apply -f deploy/k8s/keda/scaledobject.yaml
+kubectl wait --for=condition=complete job/driftguard-bootstrap -n driftguard --timeout=45m
+kubectl wait --for=condition=available deployment --all -n driftguard --timeout=15m
 echo "DriftGuard is running on kind: serving http://127.0.0.1:8001, Prometheus :9090, Grafana :3000"

@@ -45,32 +45,56 @@ def guardrail_queries(dataset: str, window: str) -> dict[str, str]:
             f"(rate(driftguard_scoring_latency_seconds_bucket{{{sel}}}[{window}])))"
         ),
         "error_rate": (
-            f"{rate.format(m='scoring_errors_total', s=sel, w=window)} / "
+            # a counter series that never incremented does not exist; that means zero errors
+            f"({rate.format(m='scoring_errors_total', s=sel, w=window)} or vector(0)) / "
             f"{rate.format(m='scoring_requests_total', s=sel, w=window)}"
         ),
         "positive_rate_ratio": f"({positive_rate('challenger')}) / ({positive_rate('champion')})",
     }
 
 
-def evaluate_guardrails(values: dict[str, float | None], guardrails: dict[str, Any]) -> list[str]:
+def evaluate_guardrails(
+    values: dict[str, float | None], guardrails: dict[str, Any]
+) -> tuple[list[str], list[str]]:
     """
-    Return the names of breached guardrails.
+    Classify guardrail values as breached or missing.
 
-    Missing values (no traffic yet in the window) are not breaches; NaN error rates with zero
-    requests are treated the same way.
+    Parameters
+    ----------
+    values : dict
+        Guardrail name to the measured value; None or NaN means Prometheus had no data (down,
+        no matching series, or no traffic for an alias).
+    guardrails : dict
+        Thresholds from `configs/rollout.yaml`.
+
+    Returns
+    -------
+    breaches : list of str
+        Guardrails whose value crosses its threshold.
+    missing : list of str
+        Guardrails with no usable value. Missing evidence is never a pass: promoting without it
+        would let a challenger through when monitoring is blind.
     """
-    breaches = []
-    p99 = values.get("p99_latency_s")
-    if p99 is not None and np.isfinite(p99) and p99 * 1000.0 >= float(guardrails["p99_latency_ms"]):
-        breaches.append("p99_latency")
-    err = values.get("error_rate")
-    if err is not None and np.isfinite(err) and err >= float(guardrails["error_rate"]):
-        breaches.append("error_rate")
-    ratio = values.get("positive_rate_ratio")
+    breaches, missing = [], []
     low, high = guardrails["positive_rate_ratio"]
-    if ratio is not None and np.isfinite(ratio) and not float(low) <= ratio <= float(high):
-        breaches.append("positive_rate_ratio")
-    return breaches
+    checks = {
+        "p99_latency": (
+            "p99_latency_s",
+            lambda v: v * 1000.0 >= float(guardrails["p99_latency_ms"]),
+        ),
+        "error_rate": ("error_rate", lambda v: v >= float(guardrails["error_rate"])),
+        "positive_rate_ratio": (
+            "positive_rate_ratio",
+            lambda v: not float(low) <= v <= float(high),
+        ),
+    }
+    for name, (key, breached) in checks.items():
+        value = values.get(key)
+        if value is None or not np.isfinite(value):
+            missing.append(name)
+        elif breached(value):
+            breaches.append(name)
+    return breaches, missing
 
 
 # ============= Controller =============
@@ -122,6 +146,7 @@ class RolloutController:
     challenger_version: str | None = None
     canary_events: int = 0
     last_guardrail_check: float = float("-inf")
+    missing_checks: int = 0
     decisions: list[dict[str, Any]] = field(default_factory=list)
 
     def mode(self) -> str:
@@ -235,18 +260,22 @@ class RolloutController:
         )
         return record
 
-    def check_guardrails(self) -> tuple[list[str], dict[str, float | None]]:
-        """Query Prometheus and return breached guardrails with the values seen."""
+    def check_guardrails(self) -> tuple[list[str], list[str], dict[str, float | None]]:
+        """Query Prometheus; return breached guardrails, missing ones, and the values seen."""
         queries = guardrail_queries(self.dataset, str(self.config["guardrail_window"]))
         values = {name: self.query(promql) for name, promql in queries.items()}
-        return evaluate_guardrails(values, self.config["guardrails"]), values
+        breaches, missing = evaluate_guardrails(values, self.config["guardrails"])
+        return breaches, missing, values
 
     def _maybe_finish_canary(self) -> dict[str, Any] | None:
         now = self.clock()
         if now - self.last_guardrail_check >= float(self.config["guardrail_check_s"]):
             self.last_guardrail_check = now
-            breaches, values = self.check_guardrails()
-            if breaches:
+            breaches, missing, values = self.check_guardrails()
+            self.missing_checks = self.missing_checks + 1 if missing and not breaches else 0
+            limit = int(self.config["guardrail_max_missing_checks"])
+            if breaches or self.missing_checks > limit:
+                reason = breaches or ["guardrail_data_unavailable"]
                 record = admin.decline(
                     self.registry,
                     self.redis,
@@ -254,18 +283,19 @@ class RolloutController:
                     self.log_path,
                     "canary_rolled_back",
                     {
-                        "breaches": breaches,
+                        "breaches": reason,
+                        "missing_guardrails": missing,
                         "guardrail_values": values,
                         "canary_events": self.canary_events,
                     },
                 )
                 self.decisions.append(record)
-                logger.warning("canary_rolled_back", breaches=breaches)
+                logger.warning("canary_rolled_back", breaches=reason, missing=missing)
                 return record
         if self.canary_events >= int(self.config["canary_min_events"]):
-            breaches, values = self.check_guardrails()
-            if breaches:
-                return None
+            breaches, missing, values = self.check_guardrails()
+            if breaches or missing:
+                return None  # promotion needs fresh, passing evidence for every guardrail
             record = admin.promote(
                 self.registry,
                 self.redis,

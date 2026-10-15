@@ -8,6 +8,8 @@ canary_fraction: 0.10
 canary_min_events: 20000
 guardrails: {p99_latency_ms: 50, error_rate: 0.005, positive_rate_ratio: [0.5, 1.5]}
 guardrail_check_s: 30
+# consecutive checks with missing guardrail data before the canary is rolled back (about 5 min)
+guardrail_max_missing_checks: 10
 guardrail_window: 2m
 watcher_poll_s: 10
 warmup_rows: 256

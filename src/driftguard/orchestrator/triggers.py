@@ -33,6 +33,8 @@ TERMINAL_MAP = {
     "CANCELLING": "cancelled",
 }
 PAUSE_KEY = "dg:retrain:paused:{dataset}"
+ROLLOUT_KEY = "dg:rollout:{dataset}"
+ACTIVE_ROLLOUT_MODES = ("shadow", "canary")
 
 
 # ============= Store =============
@@ -143,6 +145,14 @@ def handle_drift_event(
         trigger_id = store.record(dataset, event["window_id"], "skipped_paused", detail=paused)
         RETRAINING_TRIGGERS.labels(dataset=dataset, result="skipped_paused").inc()
         return TriggerOutcome(trigger_id, "skipped_paused", None)
+    rollout_mode = redis_client.get(ROLLOUT_KEY.format(dataset=dataset))
+    if rollout_mode in ACTIVE_ROLLOUT_MODES:
+        # a new challenger would replace the alias under an in-flight shadow or canary stage
+        trigger_id = store.record(
+            dataset, event["window_id"], "skipped_active_rollout", detail=rollout_mode
+        )
+        RETRAINING_TRIGGERS.labels(dataset=dataset, result="skipped_active_rollout").inc()
+        return TriggerOutcome(trigger_id, "skipped_active_rollout", None)
     trigger_id = store.record(dataset, event["window_id"], "pending")
     parameters = {
         "dataset": dataset,

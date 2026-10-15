@@ -4,11 +4,10 @@ kind: Job
 metadata:
   name: driftguard-bootstrap
   labels: {{- include "driftguard.labels" . | nindent 4 }}
-  annotations:
-    helm.sh/hook: post-install
-    helm.sh/hook-delete-policy: before-hook-creation
 spec:
-  backoffLimit: 6
+  # a regular release resource, not a hook: `helm install --wait` blocks on serving readiness,
+  # which needs the champion this Job creates (k8s_up.sh waits for the Job explicitly)
+  backoffLimit: 12
   template:
     spec:
       restartPolicy: OnFailure

@@ -37,6 +37,7 @@ logger = get_logger("training.flow")
 STATUS_REJECTED_DQ = "rejected_data_quality"
 STATUS_REGISTERED = "registered"
 STATUS_INSUFFICIENT = "rejected_insufficient_data"
+STATUS_ACTIVE_CHALLENGER = "skipped_active_challenger"
 
 
 # ============= Packaging =============
@@ -210,6 +211,10 @@ def run_retraining(params: dict[str, Any], deps: RetrainDeps) -> dict[str, Any]:
     """
     dataset, trigger_id = params["dataset"], params["trigger_id"]
     cfg = deps.retrain_config
+    if deps.registry.get_alias(model_name(dataset), CHALLENGER) is not None:
+        # never replace the challenger of an in-flight shadow or canary stage
+        deps.report_status(trigger_id, STATUS_ACTIVE_CHALLENGER)
+        return {"trigger_id": trigger_id, "status": STATUS_ACTIVE_CHALLENGER}
     frame = deps.build_window(int(params["window_end_ms"]), int(cfg["train_window_labeled"]))
     summary: dict[str, Any] = {
         "trigger_id": trigger_id,

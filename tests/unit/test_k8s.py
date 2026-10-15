@@ -141,3 +141,16 @@ def test_analyze_scaling_timings():
     assert result["peak_lag"] == 90000 and result["max_replicas"] == 6
     assert result["time_to_drain_below_threshold_s"] == 40
     assert result["scale_in_after_load_drop_s"] == 200
+
+
+def test_install_does_not_wait_on_serving_before_bootstrap_runs():
+    """Regression (M11): `helm install --wait` blocks on serving readiness, which needs the champion
+    created by the bootstrap Job, so a post-install hook plus --wait deadlocks."""
+    script = (ROOT / "scripts" / "k8s_up.sh").read_text()
+    install = script[
+        script.index("helm install driftguard") : script.index("kubectl apply -f deploy/k8s/keda")
+    ]
+    assert "--wait" not in install
+    assert "job/driftguard-bootstrap" in script and "--for=condition=complete" in script
+    jobs = (CHART / "templates" / "jobs.yaml").read_text()
+    assert "helm.sh/hook" not in jobs

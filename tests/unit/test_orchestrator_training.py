@@ -244,6 +244,7 @@ def test_run_retraining_registers_challenger_and_starts_shadow(tmp_path):
     assert set(registry.versions[version]) == {"model.onnx", "features.json", "reference.parquet"}
     # a second run compares against an existing champion on the same holdout
     registry.set_alias(name, CHAMPION, version)
+    registry.delete_alias(name, CHALLENGER)  # the first stage ended
     second = run_retraining({**PARAMS, "trigger_id": "t2"}, deps)
     assert second["holdout"]["champion"] is not None
     assert json.loads(registry.tags[second["challenger_version"]]["holdout_comparison"])
@@ -268,3 +269,28 @@ def test_gx_validator_bounds_and_mostly():
     report = validator.validate(broken)
     assert not report.success and any(":a" in item for item in report.failed)
     assert not validator.validate(frame.iloc[:50]).success
+
+
+def test_trigger_skipped_during_active_rollout(tmp_path):
+    """Regression (M2): a new run replaced the challenger under an in-flight shadow or canary."""
+    store, redis = TriggerStore(tmp_path / "o.db"), fakeredis.FakeRedis(decode_responses=True)
+    for mode in ("shadow", "canary"):
+        redis.set("dg:rollout:cicids2017", mode)
+        outcome = handle_drift_event(
+            EVENT, store, redis, lambda p: pytest.fail("must not submit while rolling out")
+        )
+        assert outcome.status == "skipped_active_rollout"
+    redis.set("dg:rollout:cicids2017", "champion_only")
+    assert handle_drift_event(EVENT, store, redis, lambda p: "run-9").status == "submitted"
+
+
+def test_retraining_flow_refuses_to_replace_an_existing_challenger(tmp_path):
+    registry = FakeRegistry(tmp_path)
+    deps, statuses, modes = _deps(tmp_path, registry)
+    first = run_retraining(PARAMS, deps)
+    assert first["status"] == STATUS_REGISTERED
+    versions_before = dict(registry.versions)
+    second = run_retraining({**PARAMS, "trigger_id": "t2"}, deps)
+    assert second["status"] == "skipped_active_challenger"
+    assert registry.versions == versions_before and modes == ["shadow"]
+    assert statuses[-1] == "skipped_active_challenger"
