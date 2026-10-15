@@ -100,6 +100,7 @@ def direct_historical(offline: OfflineStore, dataset: str):
     """
 
     def historical(entity_df: pd.DataFrame, feature_refs: list[str]) -> pd.DataFrame:
+        """Point-in-time join read straight from the offline parquet."""
         names = [ref.split(":", 1)[1] for ref in feature_refs]
         stored = offline.read(dataset, "flow_features", ["event_id", "event_timestamp", *names])
         stored = stored.drop_duplicates("event_id", keep="first")

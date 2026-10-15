@@ -82,7 +82,25 @@ def kyoto_per_year(per_year: dict[str, dict[str, dict]], path: Path) -> Path:
 def cicids_timeline(
     rolling: list[dict], drift_times: list[float], gate: list[tuple[float, str]], path: Path
 ) -> Path:
-    """Rolling PR-AUC over the CICIDS2017 week with drift events and gate decisions marked."""
+    """
+    Rolling PR-AUC over the CICIDS2017 week with drift events and gate decisions marked.
+
+    Parameters
+    ----------
+    rolling : list[dict]
+        Rolling PR-AUC rows from `rolling_pr_auc`.
+    drift_times : list[float]
+        Event times (ms) of drift events.
+    gate : list[tuple[float, str]]
+        (event time ms, action) pairs of gate decisions.
+    path : Path
+        Output PNG path.
+
+    Returns
+    -------
+    path : Path
+        The written file.
+    """
     fig, ax = plt.subplots(figsize=(9, 4.2), facecolor=SURFACE)
     xs = [(r["end_event_time"] - rolling[0]["start_event_time"]) / 3.6e6 for r in rolling]
     ax.plot(

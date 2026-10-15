@@ -116,9 +116,33 @@ def latency_query(q: float, dataset: str) -> str:
 
 
 def run_step(
-    rate: float, duration_s: float, frame, dataset: str, config: dict, retrain: bool, redis_client
+    rate: float, duration_s: float, frame, dataset: str, config: dict, o_retrain: bool, redis_client
 ) -> dict[str, Any]:
-    """Produce at a fixed rate for one step while sampling metrics; return the step summary."""
+    """
+    Produce at a fixed rate for one step while sampling metrics; return the step summary.
+
+    Parameters
+    ----------
+    rate : float
+        Target events per second.
+    duration_s : float
+        Step length in seconds.
+    frame : object
+        Rows to replay.
+    dataset : str
+        Dataset name.
+    config : dict
+        `configs/eval/e3.yaml` content.
+    o_retrain : bool
+        Submit a retraining run in the middle of the step.
+    redis_client : object
+        Redis client used to sample memory.
+
+    Returns
+    -------
+    summary : dict
+        Rates, lag, step-level latency quantiles, DLQ rate, memory, and the saturation flag.
+    """
     from driftguard.common.metrics import scrape_metric as metric_value
     from driftguard.orchestrator.main import submit_deployment
 
@@ -136,7 +160,7 @@ def run_step(
     retrain_run, last_stats = None, 0.0
     while producer.is_alive():
         elapsed = time.monotonic() - started
-        if retrain and retrain_run is None and elapsed >= float(config["retrain_at_s"]):
+        if o_retrain and retrain_run is None and elapsed >= float(config["retrain_at_s"]):
             retrain_run = submit_deployment(
                 "retrain/retrain-on-drift",
                 {
@@ -216,7 +240,25 @@ def step_latency(
 
 
 def produce_rate(frame, dataset: str, rate: float, duration_s: float) -> dict[str, Any]:
-    """Produce flows from `frame` at a fixed rate for `duration_s` seconds."""
+    """
+    Produce flows from `frame` at a fixed rate for `duration_s` seconds.
+
+    Parameters
+    ----------
+    frame : object
+        Rows to replay.
+    dataset : str
+        Dataset name.
+    rate : float
+        Events per second.
+    duration_s : float
+        Maximum seconds of emission.
+
+    Returns
+    -------
+    stats : dict
+        Counts and the achieved flow rate.
+    """
     from confluent_kafka import Producer
 
     from driftguard.common.kafka import producer_config
@@ -229,6 +271,7 @@ def produce_rate(frame, dataset: str, rate: float, duration_s: float) -> dict[st
     producer = Producer(producer_config(settings.kafka_bootstrap_servers, "e3-producer"))
 
     def send(topic: str, key: str, value: bytes) -> None:
+        """Produce one message, backing off while the local queue is full."""
         while True:
             try:
                 producer.produce(topic, key=key.encode(), value=value)
@@ -304,7 +347,19 @@ def restart_consumer(mode: str) -> None:
 
 
 def run_e3(config: dict) -> dict[str, Any]:
-    """Run every condition, stream-feature mode, and rate step."""
+    """
+    Run every condition, stream-feature mode, and rate step.
+
+    Parameters
+    ----------
+    config : dict
+        `configs/eval/e3.yaml` content.
+
+    Returns
+    -------
+    results : dict
+        Steps and the saturation rate per stream-feature mode and condition.
+    """
     from redis import Redis
 
     from driftguard.data.loader import load_stream_frame

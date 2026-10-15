@@ -35,10 +35,29 @@ def build_challengers(
     - better: champion days plus the post-drift training half (newer data).
     - equal: identical data and seed to the champion.
     - worse: champion days with labels shuffled.
+
+    Parameters
+    ----------
+    champion_rows : pd.DataFrame
+        Rows the champion trains on.
+    post_train : pd.DataFrame
+        Older part of the post-drift day.
+    features : list[str]
+        Model feature names.
+    model_config : dict
+        `configs/model.yaml` content.
+    shuffle_seed : int
+        Seed for the label shuffle of the worse challenger.
+
+    Returns
+    -------
+    models : dict
+        Fitted models keyed `champion`, `better`, `equal`, and `worse`.
     """
     params, seed = model_config["lightgbm"], int(model_config["seed"])
 
     def fit(frame: pd.DataFrame, labels: np.ndarray | None = None):
+        """Fit one model on a frame, optionally with replacement labels."""
         y = frame["label"].to_numpy() if labels is None else labels
         model, _ = train_model(frame[features].to_numpy(np.float32), y, params, seed)
         return model
@@ -53,7 +72,19 @@ def build_challengers(
 
 
 def run_e5(config_path: str) -> dict[str, Any]:
-    """Run E5 and return its metrics."""
+    """
+    Run E5 and return its metrics.
+
+    Parameters
+    ----------
+    config_path : str
+        Path to `configs/eval/e5.yaml`.
+
+    Returns
+    -------
+    metrics : dict
+        Shadow sample sizes and the gate decision and interval for each challenger.
+    """
     config = load_config(config_path).data
     model_config = load_config(REPO_ROOT / config["model_config"]).data
     rollout = load_config(REPO_ROOT / config["rollout_config"]).data

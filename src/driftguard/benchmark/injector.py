@@ -73,6 +73,24 @@ def prior_shift(
 
     Post-onset rows are redrawn (with replacement) from the segment's own benign rows and from
     `attack_pool`; the row count and event ids order stay stable so windows align.
+
+    Parameters
+    ----------
+    segment : pd.DataFrame
+        Stationary rows in stream order.
+    onset : int
+        Row index where the shift starts.
+    attack_rate_after : float
+        Target attack proportion after onset.
+    attack_pool : pd.DataFrame
+        Attack rows to draw from.
+    rng : np.random.Generator
+        Random generator.
+
+    Returns
+    -------
+    shifted : tuple of (pd.DataFrame, int)
+        The segment with redrawn post-onset rows and the number of rows modified.
     """
     before, after = segment.iloc[:onset], segment.iloc[onset:]
     n_after = len(after)

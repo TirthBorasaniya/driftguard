@@ -130,6 +130,7 @@ def iter_messages(
     clock_ms = int(event_time[0]) if len(event_time) else 0
 
     def row_at(index: int) -> dict[str, Any]:
+        """Return one row as a dict of native-typed values."""
         return {name: array[index] for name, array in column_arrays.items()}
 
     for kind, index in emission_plan(len(frame), plan):
@@ -295,6 +296,7 @@ def main(argv: list[str] | None = None) -> None:
     producer = Producer(producer_config(settings.kafka_bootstrap_servers, f"producer-{dataset}"))
 
     def send(topic: str, key: str, value: bytes) -> None:
+        """Produce one message, backing off while the local queue is full."""
         while True:
             try:
                 producer.produce(topic, key=key.encode(), value=value)

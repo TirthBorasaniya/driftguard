@@ -82,7 +82,7 @@ class DriftPolicy:
             return HIGH
         return LOW
 
-    def evaluate(self, window_id: str, signals: dict[str, float], gx_ok: bool) -> PolicyDecision:
+    def evaluate(self, window_id: str, signals: dict[str, float], o_gx_ok: bool) -> PolicyDecision:
         """
         Evaluate one closed window and update state.
 
@@ -92,7 +92,7 @@ class DriftPolicy:
             Window identifier.
         signals : dict
             Signal values for the window.
-        gx_ok : bool
+        o_gx_ok : bool
             False if the GX suite failed on the window.
 
         Returns
@@ -102,7 +102,7 @@ class DriftPolicy:
         self.windows_since += 1
         reasons = self.flag_reasons(signals)
         decision = PolicyDecision(window_id, flagged=bool(reasons), reasons=reasons)
-        if not gx_ok:
+        if not o_gx_ok:
             decision.data_quality_failed = True
             decision.blocked_by.append("gx_failure")
             self.consecutive = 0

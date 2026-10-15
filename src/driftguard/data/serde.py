@@ -57,6 +57,7 @@ def _fixed_subject(subject: str):
     """Subject name strategy that always returns one subject regardless of topic."""
 
     def strategy(_ctx: SerializationContext | None, _record_name: str | None) -> str:
+        """Return the fixed subject name."""
         return subject
 
     return strategy

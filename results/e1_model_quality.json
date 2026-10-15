@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "run_id": "2026-10-15T21-09-52Z_e1_model_quality",
-  "git_sha": "cb21ee8",
-  "git_dirty": true,
-  "timestamp_utc": "2026-10-15T21:09:52Z",
+  "run_id": "2026-10-15T21-48-39Z_e1_model_quality",
+  "git_sha": "11d678d",
+  "git_dirty": false,
+  "timestamp_utc": "2026-10-15T21:48:39Z",
   "config_path": "configs/eval/e1.yaml",
   "config_sha256": "981a4dac120a892a21d4d27b64d60af81721720aa3babcd63df83b3e1b1dcf08",
   "environment": {
@@ -207,7 +207,12 @@
           "precision": 1.0,
           "recall": 0.9629927594529365,
           "positive_rate": 0.17694782608695653,
-          "precision_at_recall_0_99": 1.0
+          "oracle_precision_at_recall_0_99": 1.0
+        },
+        "test_at_validation_recall_0_99": {
+          "threshold": 0.9943949288101679,
+          "precision": null,
+          "recall": 0.0
         },
         "test": {
           "n": 909632,
@@ -218,7 +223,7 @@
           "precision": null,
           "recall": 0.0,
           "positive_rate": 0.0,
-          "precision_at_recall_0_99": 0.7718064073118178,
+          "oracle_precision_at_recall_0_99": 0.7718064073118178,
           "per_family_recall": {
             "Botnet": {
               "recall": 0.0,
@@ -273,7 +278,12 @@
           "precision": 0.9998472769479825,
           "recall": 0.9510444812458235,
           "positive_rate": 0.2257862068965517,
-          "precision_at_recall_0_99": 0.999501349290156
+          "oracle_precision_at_recall_0_99": 0.999501349290156
+        },
+        "test_at_validation_recall_0_99": {
+          "threshold": 0.9748530210510383,
+          "precision": 0.9999615539878126,
+          "recall": 0.7089568512006978
         },
         "test": {
           "n": 629994,
@@ -284,7 +294,7 @@
           "precision": 0.9999796251018744,
           "recall": 0.3344440810096219,
           "positive_rate": 0.07790550386194155,
-          "precision_at_recall_0_99": 0.9995117019593819,
+          "oracle_precision_at_recall_0_99": 0.9995117019593819,
           "per_family_recall": {
             "DDoS": {
               "recall": 0.0,
@@ -331,7 +341,12 @@
           "precision": 0.9996549435965494,
           "recall": 0.9695955513219885,
           "positive_rate": 0.25982758620689655,
-          "precision_at_recall_0_99": 0.9995865526240988
+          "oracle_precision_at_recall_0_99": 0.9995865526240988
+        },
+        "test_at_validation_recall_0_99": {
+          "threshold": 0.9876685277679141,
+          "precision": 0.9999867480337395,
+          "recall": 0.9953175184166617
         },
         "test": {
           "n": 629992,
@@ -342,7 +357,7 @@
           "precision": 0.9999861284505479,
           "recall": 0.9508603235528824,
           "positive_rate": 0.22886004901649545,
-          "precision_at_recall_0_99": 0.9999867648713214,
+          "oracle_precision_at_recall_0_99": 0.9999867648713214,
           "per_family_recall": {
             "Botnet": {
               "recall": 0.0,
@@ -427,7 +442,12 @@
           "precision": 1.0,
           "recall": 0.9648383890965879,
           "positive_rate": 0.17728695652173912,
-          "precision_at_recall_0_99": 1.0
+          "oracle_precision_at_recall_0_99": 1.0
+        },
+        "test_at_validation_recall_0_99": {
+          "threshold": 0.9943928020189241,
+          "precision": null,
+          "recall": 0.0
         },
         "test": {
           "n": 909632,
@@ -438,7 +458,7 @@
           "precision": null,
           "recall": 0.0,
           "positive_rate": 0.0,
-          "precision_at_recall_0_99": 0.6454491573977122,
+          "oracle_precision_at_recall_0_99": 0.6454491573977122,
           "per_family_recall": {
             "Botnet": {
               "recall": 0.0,
@@ -494,7 +514,12 @@
             "precision": 1.0,
             "recall": 0.9629927594529365,
             "positive_rate": 0.17694782608695653,
-            "precision_at_recall_0_99": 1.0
+            "oracle_precision_at_recall_0_99": 1.0
+          },
+          "test_at_validation_recall_0_99": {
+            "threshold": 0.9943949288101679,
+            "precision": null,
+            "recall": 0.0
           },
           "test": {
             "n": 909632,
@@ -505,7 +530,7 @@
             "precision": null,
             "recall": 0.0,
             "positive_rate": 0.0,
-            "precision_at_recall_0_99": 0.7718064073118178,
+            "oracle_precision_at_recall_0_99": 0.7718064073118178,
             "per_family_recall": {
               "Botnet": {
                 "recall": 0.0,
@@ -592,7 +617,12 @@
             "precision": 1.0,
             "recall": 0.9592084383459348,
             "positive_rate": 0.17871304347826086,
-            "precision_at_recall_0_99": 1.0
+            "oracle_precision_at_recall_0_99": 1.0
+          },
+          "test_at_validation_recall_0_99": {
+            "threshold": 0.9941258323374149,
+            "precision": null,
+            "recall": 0.0
           },
           "test": {
             "n": 909632,
@@ -603,7 +633,7 @@
             "precision": null,
             "recall": 0.0,
             "positive_rate": 0.0,
-            "precision_at_recall_0_99": 0.931496322318586,
+            "oracle_precision_at_recall_0_99": 0.931496322318586,
             "per_family_recall": {
               "Botnet": {
                 "recall": 0.0,
@@ -690,7 +720,12 @@
             "precision": 1.0,
             "recall": 0.9667043166527526,
             "positive_rate": 0.17117391304347826,
-            "precision_at_recall_0_99": 1.0
+            "oracle_precision_at_recall_0_99": 1.0
+          },
+          "test_at_validation_recall_0_99": {
+            "threshold": 0.9943535362390182,
+            "precision": null,
+            "recall": 0.0
           },
           "test": {
             "n": 903568,
@@ -701,7 +736,7 @@
             "precision": null,
             "recall": 0.0,
             "positive_rate": 0.0,
-            "precision_at_recall_0_99": 0.7853588322941831,
+            "oracle_precision_at_recall_0_99": 0.7853588322941831,
             "per_family_recall": {
               "Botnet": {
                 "recall": 0.0,
@@ -773,13 +808,28 @@
       }
     },
     "v1_figure_trace": {
-      "time_ordered": 0.7718064073118178,
-      "within_day": 0.9995117019593819,
-      "random_stratified_upper_bound": 0.9999867648713214,
-      "target_figure": {
+      "time_ordered": {
+        "oracle_precision_at_recall_0_99": 0.7718064073118178,
+        "validated_precision": null,
+        "validated_recall": 0.0
+      },
+      "within_day": {
+        "oracle_precision_at_recall_0_99": 0.9995117019593819,
+        "validated_precision": 0.9999615539878126,
+        "validated_recall": 0.7089568512006978
+      },
+      "random_stratified_upper_bound": {
+        "oracle_precision_at_recall_0_99": 0.9999867648713214,
+        "validated_precision": 0.9999867480337395,
+        "validated_recall": 0.9953175184166617
+      },
+      "unverified_target_figure": {
         "precision": 0.98,
         "recall": 0.99
       }
+    },
+    "config_overrides": {
+      "ablations.o_stream_features": false
     }
   },
   "notes": "Primary protocol is time-ordered (train Monday to Wednesday, test Thursday and Friday with unseen attack families). The random stratified split is an upper-bound reference only. The stream-feature ablation was skipped for this run (--skip-stream-ablation, no Redis available); rerun without the flag to add it."

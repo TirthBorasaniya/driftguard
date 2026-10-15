@@ -114,6 +114,13 @@ class ScoringClient:
         ------
         ScoringUnavailableError
             After `1 + retries` failed attempts.
+
+        Parameters
+        ----------
+        events : list[tuple[str, list[float]]]
+            (event id, feature vector) pairs.
+        feature_names : list[str]
+            Names of the vector columns, in order.
         """
         body = self.payload(self.dataset, events, feature_names)
         last_error: Exception | None = None

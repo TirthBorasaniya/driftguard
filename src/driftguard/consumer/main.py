@@ -196,6 +196,16 @@ class BatchProcessor:
         Predictions are produced and flushed, then the claimed ids are marked done. The caller
         commits offsets only after this returns, which makes processing at-least-once and the
         idempotency keys make it effectively once.
+
+        Parameters
+        ----------
+        messages : list[Message]
+            Messages of one poll batch.
+
+        Returns
+        -------
+        outcome : BatchOutcome
+            Counts of consumed, dead-lettered, duplicate, and scored events and the predictions.
         """
         started = time.perf_counter()
         outcome = BatchOutcome(consumed=len(messages))

@@ -50,6 +50,7 @@ def feast_historical(settings: Settings):
     )
 
     def historical(entity_df, refs):
+        """Point-in-time join through Feast `get_historical_features`."""
         return store.get_historical_features(entity_df=entity_df, features=refs).to_df()
 
     return historical
@@ -59,6 +60,7 @@ def rollout_setter(settings: Settings):
     """Return `set_mode(dataset, mode)` calling the token-protected serving admin API."""
 
     def set_mode(dataset: str, mode: str) -> None:
+        """Set the rollout mode through the serving admin API."""
         response = httpx.post(
             f"{settings.serving_url}/admin/rollout",
             json={"dataset": dataset, "mode": mode},

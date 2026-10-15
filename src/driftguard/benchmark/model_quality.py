@@ -130,6 +130,21 @@ def run_protocol(
     """
     Fit on a training portion, choose the threshold on its validation slice, evaluate on test.
 
+    Parameters
+    ----------
+    train : pd.DataFrame
+        Training portion.
+    test : pd.DataFrame
+        Test portion.
+    features : list[str]
+        Model feature names.
+    model_config : LoadedConfig
+        Loaded `configs/model.yaml`.
+    validation : dict[str, Any]
+        Validation split settings (`method`, `fraction`, `block_size`).
+    target_recall : float
+        Recall target for the threshold.
+
     Returns
     -------
     result : dict

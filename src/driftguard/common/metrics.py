@@ -142,6 +142,7 @@ def _make_handler(
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
+            """Serve `/metrics` and `/healthz`."""
             if self.path.startswith("/metrics"):
                 body = generate_latest(registry)
                 self._reply(200, body, CONTENT_TYPE_LATEST)
@@ -159,6 +160,7 @@ def _make_handler(
             self.wfile.write(body)
 
         def log_message(self, *_args: object) -> None:
+            """Silence the default per-request logging."""
             return
 
     return Handler

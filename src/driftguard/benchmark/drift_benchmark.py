@@ -67,6 +67,27 @@ def prepare_base(
     """
     Shuffle the base rows (making them stationary by construction), train the reference model on
     `train_fraction` of them, and keep the rest as the pool segments are drawn from.
+
+    Parameters
+    ----------
+    dataset : str
+        Dataset name.
+    frame : pd.DataFrame
+        All rows of the base period.
+    config : dict
+        `configs/eval/e2.yaml` content (uses `train_fraction`).
+    model_config : dict
+        `configs/model.yaml` content.
+    policy_config : dict
+        `configs/drift_policy.yaml` content.
+    seed : int
+        Seed for the shuffle.
+
+    Returns
+    -------
+    base : BaseData
+        Pool, attack pool, reference rows, drift reference, trained model, threshold, and GX
+        validator.
     """
     features = feature_names(dataset)
     shuffled = frame.sample(frac=1.0, random_state=seed).reset_index(drop=True)
@@ -142,7 +163,31 @@ def run_segment(
     chunk_size: int,
     rng: np.random.Generator,
 ) -> MonitorCore:
-    """Stream a (possibly shifted) segment through a fresh MonitorCore and return it."""
+    """
+    Stream a (possibly shifted) segment through a fresh MonitorCore and return it.
+
+    Parameters
+    ----------
+    base : BaseData
+        Prepared base data.
+    segment : pd.DataFrame
+        Rows to stream, in order (possibly with an injected shift).
+    policy_config : dict
+        `configs/drift_policy.yaml` content with the window size set.
+    coverage : float
+        Fraction of rows that eventually receive a label.
+    delay : dict
+        Label delay bounds, `{min, max}` in events.
+    chunk_size : int
+        Events fed to the monitor per step.
+    rng : np.random.Generator
+        Random generator for label arrival.
+
+    Returns
+    -------
+    core : MonitorCore
+        The monitor after the segment, holding signal and decision logs.
+    """
     core = MonitorCore(
         base.dataset,
         policy_config,
@@ -255,7 +300,21 @@ def summarize_gx(runs: list[dict[str, int]]) -> dict[str, float | None]:
 
 
 def shift_grid(config: dict, dataset: str) -> list[tuple[str, str, dict]]:
-    """Every (shift type, magnitude label, params) combination for a dataset."""
+    """
+    Every (shift type, magnitude label, params) combination for a dataset.
+
+    Parameters
+    ----------
+    config : dict
+        `configs/eval/e2.yaml` content.
+    dataset : str
+        Dataset name.
+
+    Returns
+    -------
+    grid : list of tuple
+        (shift type, magnitude label, parameters) for every shift and magnitude.
+    """
     shifts = config["shifts"]
     grid = []
     cov = shifts["covariate"]
@@ -288,7 +347,23 @@ def shift_grid(config: dict, dataset: str) -> list[tuple[str, str, dict]]:
 
 
 def run_dataset(base: BaseData, config: dict, policy_config: dict) -> dict[str, Any]:
-    """Run every shift, magnitude, coverage, and seed for one dataset."""
+    """
+    Run every shift, magnitude, coverage, and seed for one dataset.
+
+    Parameters
+    ----------
+    base : BaseData
+        Prepared base data.
+    config : dict
+        `configs/eval/e2.yaml` content.
+    policy_config : dict
+        `configs/drift_policy.yaml` content.
+
+    Returns
+    -------
+    results : dict
+        Per label coverage and shift: detector summaries, GX statistics, and onset manifests.
+    """
     size, n_windows = int(config["window_size"]), int(config["n_windows"])
     # the benchmark's window size governs the monitor core's count windows
     policy_config = {**policy_config, "window_size": size}

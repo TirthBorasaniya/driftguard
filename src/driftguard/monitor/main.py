@@ -238,10 +238,10 @@ class MonitorCore:
         DRIFT_SHARE.labels(dataset=self.dataset).set(signals["drift_share"])
         SCORE_PSI.labels(dataset=self.dataset).set(signals["score_psi"])
 
-    def _apply_pause(self, gx_ok: bool) -> None:
+    def _apply_pause(self, o_gx_ok: bool) -> None:
         """Pause retraining on a GX failure; lift a data-quality pause on the next clean window."""
         key = PAUSE_KEY.format(dataset=self.dataset)
-        if not gx_ok:
+        if not o_gx_ok:
             DATA_QUALITY_FAILURES.labels(dataset=self.dataset).inc()
             # nx: an operator pause (or any other owner's value) must never be overwritten, or the
             # next clean window would delete it as if it were a data-quality pause

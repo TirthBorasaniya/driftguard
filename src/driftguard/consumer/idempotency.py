@@ -73,6 +73,11 @@ class IdempotencyStore:
         """
         Try to claim each event id in one pipeline round trip.
 
+        Parameters
+        ----------
+        event_ids : list[str]
+            Event ids to claim.
+
         Returns
         -------
         result : ClaimResult

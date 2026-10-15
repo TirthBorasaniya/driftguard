@@ -89,7 +89,19 @@ def _protocol_row(label: str, result: dict[str, Any]) -> list[Any]:
 
 
 def render_e1_model_quality(doc: dict[str, Any]) -> str:
-    """Render E1: protocols (time-ordered first), per-family recall, and ablations."""
+    """
+    Render E1: protocols (time-ordered first), per-family recall, and ablations.
+
+    Parameters
+    ----------
+    doc : dict[str, Any]
+        Results document (`results/<name>.json`) with its `metrics` block.
+
+    Returns
+    -------
+    markdown : str
+        Protocol table, per-family recall table, and ablation table.
+    """
     metrics = doc["metrics"]
     headers = [
         "Protocol",
@@ -156,7 +168,19 @@ DETECTOR_ORDER = (
 
 
 def render_e2_drift_detection(doc: dict[str, Any]) -> str:
-    """Render E2: one table per dataset and label coverage, rows per shift and detector."""
+    """
+    Render E2: one table per dataset and label coverage, rows per shift and detector.
+
+    Parameters
+    ----------
+    doc : dict[str, Any]
+        Results document (`results/<name>.json`) with its `metrics` block.
+
+    Returns
+    -------
+    markdown : str
+        One table per dataset and label coverage.
+    """
     parts = []
     headers = [
         "Shift",
@@ -236,7 +260,19 @@ def _headline_e5(doc: dict[str, Any]) -> str:
 
 
 def render_e3_load(doc: dict[str, Any]) -> str:
-    """Render E3: one row per run and rate step."""
+    """
+    Render E3: one row per run and rate step.
+
+    Parameters
+    ----------
+    doc : dict[str, Any]
+        Results document (`results/<name>.json`) with its `metrics` block.
+
+    Returns
+    -------
+    markdown : str
+        One row per run and rate step with the saturation summary.
+    """
     m = doc["metrics"]
     headers = [
         "Run",
@@ -318,7 +354,19 @@ def render_onnx_latency(doc: dict[str, Any]) -> str:
 
 
 def render_e4_adaptation(doc: dict[str, Any]) -> str:
-    """Render E4: Kyoto PR-AUC per year (static vs adaptive) and lifecycle counts per run."""
+    """
+    Render E4: Kyoto PR-AUC per year (static vs adaptive) and lifecycle counts per run.
+
+    Parameters
+    ----------
+    doc : dict[str, Any]
+        Results document (`results/<name>.json`) with its `metrics` block.
+
+    Returns
+    -------
+    markdown : str
+        Kyoto PR-AUC per year, lifecycle counts, and figure links.
+    """
     m = doc["metrics"]
     parts = []
     kyoto = m.get("kyoto")
@@ -376,6 +424,7 @@ def _headline_e4(doc: dict[str, Any]) -> str:
         return "see E4 section"
 
     def mean(mode: str) -> float | None:
+        """Mean of the non-null yearly PR-AUC values of one mode."""
         values = [
             v["pr_auc"]
             for v in kyoto["modes"][mode]["pr_auc_per_year"].values()

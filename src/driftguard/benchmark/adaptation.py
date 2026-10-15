@@ -188,7 +188,29 @@ class StreamCollector:
 def run_mode(
     dataset: str, mode: str, frame: pd.DataFrame, rate_eps: float, initial: str, config: dict
 ) -> dict[str, Any]:
-    """Replay the stream once in `static` or `adaptive` mode and collect everything."""
+    """
+    Replay the stream once in `static` or `adaptive` mode and collect everything.
+
+    Parameters
+    ----------
+    dataset : str
+        Dataset name.
+    mode : str
+        `static` (retraining paused) or `adaptive` (full policy).
+    frame : pd.DataFrame
+        Stream-ordered event frame to replay.
+    rate_eps : float
+        Producer rate in events per second.
+    initial : str
+        Version of the initial champion restored before the run.
+    config : dict
+        `configs/eval/e4.yaml` content.
+
+    Returns
+    -------
+    result : dict
+        Counts, drift events, promotions, lifecycle summary, and the joined predictions and labels.
+    """
     from redis import Redis
 
     from driftguard.benchmark.loadtest import produce_rate
@@ -243,7 +265,21 @@ def run_mode(
 
 
 def run_dataset(dataset: str, config: dict) -> dict[str, Any]:
-    """Bring the stack up for one dataset, bootstrap, and run its modes."""
+    """
+    Bring the stack up for one dataset, bootstrap, and run its modes.
+
+    Parameters
+    ----------
+    dataset : str
+        Dataset name.
+    config : dict
+        `configs/eval/e4.yaml` content.
+
+    Returns
+    -------
+    result : dict
+        Initial champion, stream size, and per-mode results with PR-AUC series.
+    """
     from driftguard.data.loader import load_stream_frame
 
     compose("up", "-d", "--wait", dataset=dataset)

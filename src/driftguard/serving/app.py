@@ -122,6 +122,7 @@ def create_app(
     app = FastAPI(title="DriftGuard serving", version="2.0.0", lifespan=lifespan)
 
     def require_token(authorization: Annotated[str | None, Header()] = None) -> None:
+        """Reject requests without a valid admin bearer token."""
         expected = settings.admin_token.get_secret_value()
         problem = secret_problem(expected)
         if problem:
@@ -131,10 +132,12 @@ def create_app(
             raise HTTPException(401, "invalid admin token")
 
     def check_dataset(dataset: str) -> None:
+        """Reject requests for a dataset this router does not serve."""
         if dataset != settings.dataset:
             raise HTTPException(400, f"this router serves {settings.dataset}")
 
     def matrix_of(request: ScoreRequest) -> np.ndarray:
+        """Build the float32 feature matrix of a request, rejecting non-finite values."""
         matrix = np.asarray([event.features for event in request.events], dtype=np.float32)
         if not np.isfinite(matrix).all():
             raise HTTPException(422, "features must be finite")
@@ -142,6 +145,7 @@ def create_app(
 
     @app.post("/score")
     def score(body: ScoreRequest, request: Request) -> dict:
+        """Score a batch with the champion, or split it in canary mode."""
         check_dataset(body.dataset)
         try:
             return request.app.state.router.score(
@@ -154,6 +158,7 @@ def create_app(
 
     @app.post("/score/shadow")
     def score_shadow(body: ScoreRequest, request: Request) -> dict:
+        """Score a batch with the challenger while shadow mode is active."""
         check_dataset(body.dataset)
         try:
             result = request.app.state.router.score_shadow(
@@ -167,10 +172,12 @@ def create_app(
 
     @app.get("/healthz")
     def healthz() -> dict:
+        """Liveness probe."""
         return {"status": "ok"}
 
     @app.get("/readyz")
     def readyz(request: Request) -> Response:
+        """Readiness probe: 200 once the champion is loaded and warm."""
         ready = request.app.state.store.ready()
         return Response(
             '{"ready": %s}' % ("true" if ready else "false"),
@@ -180,15 +187,18 @@ def create_app(
 
     @app.get("/metrics")
     def metrics() -> Response:
+        """Prometheus metrics."""
         return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     @app.get("/predictions/recent")
     def recent(request: Request, limit: int = Query(50, ge=1, le=1000)) -> dict:
+        """Recent predictions: ids, scores, decisions, and versions only."""
         items = list(request.app.state.router.recent)[-limit:]
         return {"dataset": settings.dataset, "predictions": items}
 
     @app.post("/admin/rollout", dependencies=[Depends(require_token)])
     def rollout(body: RolloutRequest, request: Request) -> dict:
+        """Set the rollout mode (admin)."""
         check_dataset(body.dataset)
         if body.mode not in MODES:
             raise HTTPException(422, f"mode must be one of {MODES}")
@@ -203,6 +213,7 @@ def create_app(
 
     @app.post("/admin/rollback", dependencies=[Depends(require_token)])
     def rollback(body: RollbackRequest, request: Request) -> dict:
+        """Restore the previous champion (admin)."""
         check_dataset(body.dataset)
         try:
             entry = admin.rollback(

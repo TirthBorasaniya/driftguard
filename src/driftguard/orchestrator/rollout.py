@@ -33,6 +33,7 @@ def guardrail_queries(dataset: str, window: str) -> dict[str, str]:
     rate = "sum(rate(driftguard_{m}{{{s}}}[{w}]))"
 
     def positive_rate(alias: str) -> str:
+        """PromQL for the positive-decision rate of one alias."""
         s = f'{sel},alias="{alias}"'
         return (
             f"{rate.format(m='positive_decisions_total', s=s, w=window)} / "
@@ -317,6 +318,7 @@ def prometheus_query(base_url: str) -> Callable[[str], float | None]:
     import httpx
 
     def query(promql: str) -> float | None:
+        """Evaluate an instant query; None when there is no sample."""
         try:
             response = httpx.get(f"{base_url}/api/v1/query", params={"query": promql}, timeout=10)
             response.raise_for_status()

@@ -20,13 +20,13 @@ logger = get_logger("benchmark.e3b")
 # ============= Cluster helpers =============
 
 
-def kubectl(*args: str, capture: bool = True) -> str:
+def kubectl(*args: str, o_capture: bool = True) -> str:
     """Run kubectl against the repository kubeconfig."""
     env = {**os.environ, "KUBECONFIG": str(REPO_ROOT / ".kube" / "config")}
     result = subprocess.run(
-        ["kubectl", *args], check=True, capture_output=capture, text=True, env=env
+        ["kubectl", *args], check=True, capture_output=o_capture, text=True, env=env
     )
-    return result.stdout if capture else ""
+    return result.stdout if o_capture else ""
 
 
 def ready_replicas(namespace: str, deployment: str = "driftguard-consumer") -> int:
@@ -38,7 +38,25 @@ def ready_replicas(namespace: str, deployment: str = "driftguard-consumer") -> i
 
 
 def job_manifest(config: dict, name: str, command: list[str], args: list[str]) -> str:
-    """Render the chart's producer Job with a custom name, command, and arguments."""
+    """
+    Render the chart's producer Job with a custom name, command, and arguments.
+
+    Parameters
+    ----------
+    config : dict
+        `configs/eval/e3b.yaml` content.
+    name : str
+        Job name.
+    command : list[str]
+        Container command.
+    args : list[str]
+        Container arguments.
+
+    Returns
+    -------
+    manifest : str
+        YAML of the rendered Job.
+    """
     rendered = subprocess.run(
         [
             str(REPO_ROOT / ".cache" / "bin" / "helm")
@@ -118,6 +136,20 @@ def analyze(samples: list[dict], phases: list[dict], threshold: float) -> dict[s
     Derive scaling timings from samples of `{t_s, replicas, lag}`.
 
     Phase boundaries are taken from the configured durations relative to the run start.
+
+    Parameters
+    ----------
+    samples : list[dict]
+        Samples of `{t_s, replicas, lag}`.
+    phases : list[dict]
+        Configured load phases with `rate_eps` and `duration_s`.
+    threshold : float
+        Lag threshold in messages.
+
+    Returns
+    -------
+    timings : dict
+        Time to first new pod, peak lag, drain time, and scale-in time.
     """
     step_up = phases[0]["duration_s"]
     step_down = step_up + phases[1]["duration_s"]
@@ -170,6 +202,7 @@ def run_e3b(config: dict, o_reduced: bool = False, source: str = "dataset") -> d
     started = time.monotonic()
 
     def sample() -> None:
+        """Sample replicas and lag until the run stops."""
         while not stop.is_set():
             samples.append(
                 {

@@ -85,6 +85,15 @@ def transform(raw: pd.DataFrame, source_file: str, config: LoadedConfig) -> tupl
     """
     Convert one AnoShift frame into the adapter output.
 
+    Parameters
+    ----------
+    raw : pd.DataFrame
+        One AnoShift parquet frame.
+    source_file : str
+        File name used in event ids.
+    config : LoadedConfig
+        Loaded `configs/data/kyoto.yaml`.
+
     Returns
     -------
     frame : pd.DataFrame
