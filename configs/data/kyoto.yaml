@@ -7,7 +7,7 @@ dataset: kyoto
 url: https://storage.googleapis.com/bitdefender_ml_artifacts/anoshift/Kyoto-2016_AnoShift.tar
 archive: Kyoto-2016_AnoShift.tar
 # recorded by scripts/download_kyoto_anoshift.py on the first full download
-sha256: null
+sha256: a12485e086ed657509e85dd100c28c5b2b287054b431c9105622a49709ca2920
 raw_dir: data/raw/kyoto_anoshift
 member_dir: Kyoto-2016_AnoShift/subset
 file_pattern: "{year}_subset.parquet"

@@ -91,3 +91,16 @@ def test_bad_bins_and_labels_rejected():
 def test_month_id_boundaries():
     assert month_id(1_199_145_599_000) == "2007-12"  # 2007-12-31 23:59:59 UTC
     assert month_id(1_199_145_600_000) == "2008-01"
+
+
+def test_non_contiguous_input_index_does_not_misalign_columns():
+    """Regression: yearly parquet files after 2006 have a non-range index."""
+    raw = raw_frame()
+    shuffled_index = raw.copy()
+    shuffled_index.index = [900, 7, 31, 12, 5, 44]
+    frame, report = kyoto.transform(shuffled_index, "2009_subset.parquet", dataset_config("kyoto"))
+    reference, _ = kyoto.transform(raw, "2009_subset.parquet", dataset_config("kyoto"))
+    assert len(frame) == len(reference) == 5 and report["dropped_invalid"] == 1
+    assert frame["label"].tolist() == reference["label"].tolist()
+    assert frame["duration_bin"].tolist() == reference["duration_bin"].tolist()
+    assert frame["event_id"].tolist() == reference["event_id"].tolist()

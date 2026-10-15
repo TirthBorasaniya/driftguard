@@ -2,11 +2,10 @@
 
 import argparse
 import sys
-import urllib.request
 import zipfile
-from pathlib import Path
 
 from driftguard.common.config import file_sha256, load_config
+from driftguard.common.download import download
 from driftguard.common.settings import REPO_ROOT
 
 # ============= Constants =============
@@ -16,15 +15,6 @@ CHUNK = 1 << 20
 
 
 # ============= Download =============
-
-
-def download(url: str, target: Path) -> None:
-    """Stream a URL to a file, writing to a temporary name first."""
-    partial = target.with_suffix(target.suffix + ".part")
-    with urllib.request.urlopen(url) as response, open(partial, "wb") as out:  # noqa: S310
-        while chunk := response.read(CHUNK):
-            out.write(chunk)
-    partial.rename(target)
 
 
 def main() -> int:

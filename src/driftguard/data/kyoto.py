@@ -93,7 +93,9 @@ def transform(raw: pd.DataFrame, source_file: str, config: LoadedConfig) -> tupl
     report : dict
         Rows read, rows dropped for unparseable values, unseen categorical values per feature.
     """
-    raw = raw.copy()
+    # parquet files after 2006 carry a non-contiguous pandas index; every column below is built
+    # positionally, so a stale index would misalign labels with features
+    raw = raw.reset_index(drop=True)
     raw.columns = [str(c) for c in raw.columns]
     specs = config["features"]
     check_no_leakage([spec["column"] for spec in specs], config)
