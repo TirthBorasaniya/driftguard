@@ -88,7 +88,8 @@ make setup && make up && make demo
 bounds once, and starts the Compose stack. `make demo` bootstraps the initial champion, injects a
 covariate shift into a real stream, and narrates detection, retraining, shadow evaluation, the gate
 decision, and rollback. Copy `.env.example` to `.env` and set the three secrets first. The Compose
-stack needs about 10 GB of free RAM; the Kubernetes stack needs about 12 GB.
+stack is sized for about 10 GB of free RAM and the Kubernetes stack for about 12 GB (the
+specification's figures; neither has been measured yet).
 
 ## How it works
 
@@ -169,7 +170,7 @@ Not yet run. Reproduce with `make loadtest`.
 ### E3b Kubernetes autoscaling
 
 The kind stack (Strimzi, KEDA, kube-prometheus-stack, MLflow, Prefect, and the application pods)
-needs about 12 GB of free RAM. `make k8s-up` refuses to start while the Compose stack or another
+is sized for about 12 GB of free RAM (not yet measured). `make k8s-up` refuses to start while the Compose stack or another
 kind cluster is running. On a local kind cluster the load holds at 250 events/s, steps to 2,000
 events/s, and drops back; KEDA scales the consumers on lag. Reproduce with `make k8s-up &&
 make loadtest-k8s`.
