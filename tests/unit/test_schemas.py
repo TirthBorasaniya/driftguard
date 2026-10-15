@@ -17,7 +17,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_committed_schemas_match_generation():
-    for subject, schema in all_schemas(("cicids2017",)).items():
+    for subject, schema in all_schemas(("cicids2017", "kyoto")).items():
         assert schema_path(subject).read_text() == render_schema(schema), subject
 
 

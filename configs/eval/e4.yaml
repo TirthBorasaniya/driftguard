@@ -1,0 +1,15 @@
+# E4 end-to-end adaptation (SPEC 9, E4). Drives the live Compose stack: restarts the app services
+# per dataset, bootstraps the initial champion, replays the stream, and collects predictions,
+# labels, drift events, and alias changes.
+version: 1
+kyoto:
+  # static: retraining paused by an operator flag; adaptive: full policy
+  modes: [static, adaptive]
+  rate_eps: 2000
+cicids2017:
+  modes: [adaptive]
+  rate_eps: 1000
+  rolling_window_events: 20000
+drain_timeout_s: 3600
+drain_idle_s: 60
+figures_dir: results/figures

@@ -67,6 +67,16 @@ Not yet run. Reproduce with `make loadtest`.
 Not yet run. Reproduce with `make benchmark-onnx`.
 <!-- results:onnx_latency:end -->
 
+### E4 End-to-end adaptation
+
+Kyoto streams 2008 to 2015 twice from the same initial champion: once with retraining paused
+(static) and once with the full policy (adaptive). CICIDS2017 streams the full week with the
+policy enabled. Reproduce with `make eval-e4` (drives the live stack; several hours).
+
+<!-- results:e4_adaptation:start -->
+Not yet run. Reproduce with `make eval-e4`.
+<!-- results:e4_adaptation:end -->
+
 ### E5 Promotion gate correctness
 
 Three synthetic challengers go through the shadow gate against one champion on the same 3,000

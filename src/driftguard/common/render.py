@@ -309,6 +309,78 @@ def render_onnx_latency(doc: dict[str, Any]) -> str:
     )
 
 
+def render_e4_adaptation(doc: dict[str, Any]) -> str:
+    """Render E4: Kyoto PR-AUC per year (static vs adaptive) and lifecycle counts per run."""
+    m = doc["metrics"]
+    parts = []
+    kyoto = m.get("kyoto")
+    if kyoto:
+        modes = list(kyoto["modes"])
+        years = sorted({y for r in kyoto["modes"].values() for y in r["pr_auc_per_year"]})
+        rows = [
+            [year]
+            + [
+                kyoto["modes"][mode]["pr_auc_per_year"].get(year, {}).get("pr_auc")
+                for mode in modes
+            ]
+            for year in years
+        ]
+        parts += [
+            "Kyoto 2006+, PR-AUC per streamed year:",
+            "",
+            table(["Year"] + [f"{mode} PR-AUC" for mode in modes], rows),
+            "",
+        ]
+        if kyoto.get("figure"):
+            parts += [f"![Kyoto PR-AUC per year]({kyoto['figure']})", ""]
+    rows = []
+    for dataset, block in m.items():
+        for mode, result in block["modes"].items():
+            life = result["lifecycle"]
+            rows.append(
+                [
+                    dataset,
+                    mode,
+                    life["drift_events"],
+                    life["promoted_to_canary"],
+                    life["promotions"],
+                    life["declines"],
+                    life["rollbacks"],
+                ]
+            )
+    parts += [
+        "Model lifecycle per run:",
+        "",
+        table(
+            ["Dataset", "Mode", "Drift events", "To canary", "Promotions", "Declines", "Rollbacks"],
+            rows,
+        ),
+    ]
+    cic = m.get("cicids2017")
+    if cic and cic.get("figure"):
+        parts += ["", f"![CICIDS2017 rolling PR-AUC timeline]({cic['figure']})"]
+    return "\n".join(parts)
+
+
+def _headline_e4(doc: dict[str, Any]) -> str:
+    kyoto = doc["metrics"].get("kyoto")
+    if not kyoto or not {"static", "adaptive"} <= set(kyoto["modes"]):
+        return "see E4 section"
+
+    def mean(mode: str) -> float | None:
+        values = [
+            v["pr_auc"]
+            for v in kyoto["modes"][mode]["pr_auc_per_year"].values()
+            if v["pr_auc"] is not None
+        ]
+        return sum(values) / len(values) if values else None
+
+    return (
+        f"Kyoto mean yearly PR-AUC: adaptive {fmt(mean('adaptive'))} versus static "
+        f"{fmt(mean('static'))}"
+    )
+
+
 RENDERERS: dict[str, tuple[str, Renderer | None]] = {
     "v1_verified_run": ("make import-v1-results", render_v1_verified_run),
     "e1_model_quality": ("make eval-e1", render_e1_model_quality),
@@ -316,6 +388,7 @@ RENDERERS: dict[str, tuple[str, Renderer | None]] = {
     "e5_gate": ("make eval-e5", render_e5_gate),
     "e3_load": ("make loadtest", render_e3_load),
     "onnx_latency": ("make benchmark-onnx", render_onnx_latency),
+    "e4_adaptation": ("make eval-e4", render_e4_adaptation),
 }
 
 # each headline row: (guarantee, results name, make target, extractor returning the value text)

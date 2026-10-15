@@ -1,0 +1,58 @@
+# Kyoto 2006+ adapter configuration (SPEC 3.3), AnoShift preprocessed parquet subsets.
+# Column meanings were verified against 2006_subset.parquet (see the audit): columns 0 to 13 are
+# the conventional features in original order (0, 2, 3 discretized as "c<col><bin>"), column 14 is
+# the timestamp, 15 to 17 are detector outputs, 18 is the label, 19 is the protocol.
+version: 1
+dataset: kyoto
+url: https://storage.googleapis.com/bitdefender_ml_artifacts/anoshift/Kyoto-2016_AnoShift.tar
+archive: Kyoto-2016_AnoShift.tar
+# recorded by scripts/download_kyoto_anoshift.py on the first full download
+sha256: null
+raw_dir: data/raw/kyoto_anoshift
+member_dir: Kyoto-2016_AnoShift/subset
+file_pattern: "{year}_subset.parquet"
+train_years: [2006, 2007]
+stream_years: [2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015]
+processed_dir: data/processed/kyoto
+timestamp_column: "14"
+timestamp_format: "%Y%m%d %H:%M:%S"
+label_column: "18"
+labels:
+  normal: "1"
+  known_attack: "-1"
+  unknown_attack: "-2"
+# Kyoto labels derive from IDS, antivirus, and shellcode-detector outputs, so these columns are
+# leakage and never reach the model; IPs and ports are also excluded if a file ever carries them
+excluded_columns: ["15", "16", "17", IDS_detection, Malware_detection, Ashula_detection,
+                   Source_IP_Address, Source_Port_Number, Destination_IP_Address,
+                   Destination_Port_Number, src_ip, dst_ip, src_port, dst_port]
+# categorical vocabularies observed in the 2006 subset; unseen values map to -1 and are counted
+vocabularies:
+  service: [dhcp, dns, ftp, ftp-data, http, irc, other, pop3, rdp, smtp, "smtp,ssl", snmp, ssh, ssl, teredo]
+  flag: [OTH, REJ, RSTO, RSTOS0, RSTR, RSTRH, S0, S1, S2, S3, SF, SH, SHR]
+  protocol: [icmp, tcp, udp]
+monitor_windows: month
+stream_features:
+  enabled: false
+gx:
+  mostly: 0.99
+  min_window_rows: 100
+  min_training_rows: 10000
+  reference_years: [2006, 2007]
+# documented limitation: AnoShift discretizes numeric features; PSI bins collapse onto these levels
+features:
+  - {name: duration_bin, column: "0", kind: bin, min: 0, max: null}
+  - {name: service, column: "1", kind: category, vocabulary: service, min: -1, max: null}
+  - {name: src_bytes_bin, column: "2", kind: bin, min: 0, max: null}
+  - {name: dst_bytes_bin, column: "3", kind: bin, min: 0, max: null}
+  - {name: count, column: "4", kind: numeric, min: 0, max: null}
+  - {name: same_srv_rate, column: "5", kind: numeric, min: 0, max: 1}
+  - {name: serror_rate, column: "6", kind: numeric, min: 0, max: 1}
+  - {name: srv_serror_rate, column: "7", kind: numeric, min: 0, max: 1}
+  - {name: dst_host_count, column: "8", kind: numeric, min: 0, max: null}
+  - {name: dst_host_srv_count, column: "9", kind: numeric, min: 0, max: null}
+  - {name: dst_host_same_src_port_rate, column: "10", kind: numeric, min: 0, max: 1}
+  - {name: dst_host_serror_rate, column: "11", kind: numeric, min: 0, max: 1}
+  - {name: dst_host_srv_serror_rate, column: "12", kind: numeric, min: 0, max: 1}
+  - {name: flag, column: "13", kind: category, vocabulary: flag, min: -1, max: null}
+  - {name: protocol, column: "19", kind: category, vocabulary: protocol, min: -1, max: null}

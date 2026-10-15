@@ -122,3 +122,15 @@ dashboards-check:
 benchmark: benchmark-drift benchmark-onnx
 
 eval: eval-e1 eval-e5
+
+.PHONY: download-kyoto
+
+download-kyoto:
+	$(PY) scripts/download_kyoto_anoshift.py
+
+.PHONY: eval-e4
+
+eval-e4:
+	./scripts/check_stack_free.sh compose
+	$(PY) scripts/eval_e4.py
+	$(PY) scripts/render_results.py

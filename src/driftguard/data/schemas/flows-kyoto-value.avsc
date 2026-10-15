@@ -1,0 +1,90 @@
+{
+  "type": "record",
+  "name": "KyotoFlow",
+  "namespace": "io.driftguard",
+  "fields": [
+    {
+      "name": "event_id",
+      "type": "string"
+    },
+    {
+      "name": "dataset",
+      "type": "string"
+    },
+    {
+      "name": "source_file",
+      "type": "string"
+    },
+    {
+      "name": "row_index",
+      "type": "long"
+    },
+    {
+      "name": "event_time",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "duration_bin",
+      "type": "double"
+    },
+    {
+      "name": "service",
+      "type": "double"
+    },
+    {
+      "name": "src_bytes_bin",
+      "type": "double"
+    },
+    {
+      "name": "dst_bytes_bin",
+      "type": "double"
+    },
+    {
+      "name": "count",
+      "type": "double"
+    },
+    {
+      "name": "same_srv_rate",
+      "type": "double"
+    },
+    {
+      "name": "serror_rate",
+      "type": "double"
+    },
+    {
+      "name": "srv_serror_rate",
+      "type": "double"
+    },
+    {
+      "name": "dst_host_count",
+      "type": "double"
+    },
+    {
+      "name": "dst_host_srv_count",
+      "type": "double"
+    },
+    {
+      "name": "dst_host_same_src_port_rate",
+      "type": "double"
+    },
+    {
+      "name": "dst_host_serror_rate",
+      "type": "double"
+    },
+    {
+      "name": "dst_host_srv_serror_rate",
+      "type": "double"
+    },
+    {
+      "name": "flag",
+      "type": "double"
+    },
+    {
+      "name": "protocol",
+      "type": "double"
+    }
+  ]
+}
