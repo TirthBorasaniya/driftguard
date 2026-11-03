@@ -54,6 +54,9 @@ def test_gx_config_has_monitor_and_training_modes():
         gx = dataset_config(dataset)["gx"]
         assert gx["monitor_mostly"] == 1.0
         assert gx["training_bounds"] in ("percentile_bounds", "physical_bounds")
-    assert (
-        load_config("configs/data/cicids2017.yaml")["gx"]["training_bounds"] == "percentile_bounds"
-    )
+
+
+def test_training_validates_with_physical_bounds_by_decision_d022():
+    for dataset in ("cicids2017", "kyoto"):
+        assert dataset_config(dataset)["gx"]["training_bounds"] == "physical_bounds"
+    assert load_config("configs/data/kyoto.yaml")["gx"]["training_bounds"] == "physical_bounds"

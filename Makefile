@@ -93,6 +93,11 @@ benchmark-drift:
 	$(PY) scripts/benchmark_drift.py
 	$(PY) scripts/render_results.py
 
+.PHONY: report-gx-percentile
+
+report-gx-percentile:
+	$(PY) scripts/report_gx_percentile_windows.py
+
 .PHONY: eval-e5 rollback test-e2e
 
 eval-e5:

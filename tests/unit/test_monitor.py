@@ -375,3 +375,51 @@ def test_evaluate_does_not_mutate_the_callers_signals():
     follow_up = dict(CLEAN)
     policy.evaluate("w1", follow_up, True)
     assert signals["adwin_error"] == 1.0 and "adwin_error" not in follow_up
+
+
+# ----- percentile bounds as a reported signal (D-022) -----
+
+
+class FakePercentileGX:
+    def __init__(self, failed):
+        self.failed = failed
+
+    def validate(self, frame):
+        from driftguard.training.validate import ValidationReport
+
+        return ValidationReport(not self.failed, self.failed, 1)
+
+
+def _drive(core, names, loc=3.0, windows=4):
+    events = []
+    for k in range(windows):
+        flows = _flows(names, 200, loc, k)
+        events += core.on_flows(flows) + core.on_predictions(_preds(flows, 0.9))
+    return events
+
+
+def test_percentile_failure_is_reported_but_never_gates_retraining():
+    core, names, redis = _core()
+    core.percentile_gx = FakePercentileGX(
+        ["expect_column_values_to_be_between:dst_port", "expect_column_values_to_not_be_null:x"]
+    )
+    events = _drive(core, names)
+    assert len(events) == 1
+    assert all(not d.data_quality_failed for d in core.decisions)
+    assert redis.get(PAUSE_KEY.format(dataset="cicids2017")) is None
+    reported = core.signal_log[0][1]
+    assert reported["gx_percentile_failure"] == 1.0
+    assert reported["gx_percentile_failed_features"] == 1.0
+    assert events[0]["signals"]["gx_percentile_failure"] == 1.0
+
+
+def test_percentile_signal_is_absent_without_a_validator_and_zero_when_clean():
+    core, names, _ = _core()
+    _drive(core, names, loc=0.0, windows=1)
+    assert "gx_percentile_failure" not in core.signal_log[0][1]
+    core, names, _ = _core()
+    core.percentile_gx = FakePercentileGX([])
+    _drive(core, names, loc=0.0, windows=1)
+    reported = core.signal_log[0][1]
+    assert reported["gx_percentile_failure"] == 0.0
+    assert reported["gx_percentile_failed_features"] == 0.0

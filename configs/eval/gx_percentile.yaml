@@ -1,0 +1,6 @@
+# Windows outside the fitted percentile bounds (DECISIONS D-022). Scans the real streams offline
+# and counts how many windows the percentile suite would have failed; physical bounds are scanned
+# alongside as the data-quality reference. Needs `make fit-gx-bounds` for each dataset first.
+version: 1
+datasets: [cicids2017, kyoto]
+policy_config: configs/drift_policy.yaml

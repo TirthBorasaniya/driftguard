@@ -55,12 +55,16 @@ source topic; idempotency keys prevent double scoring of events that were alread
 
 ## Refit nothing to make a run pass
 
-GX bounds are fitted once (`make fit-gx-bounds`). A rejected retraining run (`rejected_data_quality`)
-is the correct outcome for broken data; do not loosen the bounds.
+The percentile GX bounds are fitted once (`make fit-gx-bounds`) and only feed the reported
+`gx_percentile_failure` signal; never refit them to change that signal. Training validation uses
+physical bounds (DECISIONS D-022). A rejected retraining run (`rejected_data_quality`) means the
+window holds null, infinite, or physically impossible values; do not loosen those limits.
+`make report-gx-percentile` counts the real windows that fall outside the percentile bounds.
 
 ## Troubleshooting
 
 - `serving` not ready: no champion is registered. Run `make bootstrap`.
-- Monitor exits at startup: `configs/data/<dataset>_gx_bounds.json` is missing. Run `make fit-gx-bounds`.
+- Monitor logs `percentile_bounds_missing` and reports no percentile signal:
+  `configs/data/<dataset>_gx_bounds.json` is missing. Run `make fit-gx-bounds`.
 - Stream features fail at startup: `IP_HASH_SALT` is empty.
 - Prefect worker cannot deploy: check that `prefect-server` is healthy and `PREFECT_API_URL` is set.

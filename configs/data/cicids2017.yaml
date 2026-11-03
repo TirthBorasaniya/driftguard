@@ -69,8 +69,8 @@ monitor_windows: count
 gx:
   # training validation (SPEC 6.2): fitted percentile bounds and the share that must lie inside
   mostly: 0.99
-  # percentile_bounds (SPEC 6.2) or physical_bounds; see DECISIONS D-022 before changing
-  training_bounds: percentile_bounds
+  # physical_bounds (data quality only, DECISIONS D-022) or percentile_bounds (SPEC 6.2 literal)
+  training_bounds: physical_bounds
   # monitor window suite: data quality only (physical limits, finite, non-null); no row may violate
   monitor_mostly: 1.0
   min_window_rows: 100

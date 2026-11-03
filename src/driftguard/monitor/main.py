@@ -14,6 +14,7 @@ from driftguard.common.metrics import (
     DATA_QUALITY_FAILURES,
     DRIFT_EVENTS,
     DRIFT_SHARE,
+    GX_PERCENTILE_FAILURES,
     KSWIN_DETECTIONS,
     LABELED_SINCE_PROMOTION,
     LATE_EVENTS,
@@ -40,6 +41,7 @@ logger = get_logger("monitor")
 PAUSE_KEY = "dg:retrain:paused:{dataset}"
 PAUSED_BY_DATA_QUALITY = "data_quality"
 MAX_PENDING = 500_000
+BETWEEN_EXPECTATION = "expect_column_values_to_be_between"
 
 
 # ============= Core =============
@@ -61,6 +63,10 @@ class MonitorCore:
         Object with `validate(frame) -> report` (`report.success`, `report.failed`).
     window_mode : str
         `count` (CICIDS2017) or `month` (Kyoto).
+    percentile_validator : object or None
+        Suite on the fitted percentile bounds. It only reports `gx_percentile_failure` and
+        `gx_percentile_failed_features`; it never reaches the policy or the retraining pause
+        (DECISIONS D-022).
     """
 
     def __init__(
@@ -70,12 +76,14 @@ class MonitorCore:
         redis_client,
         gx_validator=None,
         window_mode: str = "count",
+        percentile_validator=None,
     ):
         self.dataset = dataset
         self.config = policy_config
         self.policy = DriftPolicy(policy_config)
         self.redis = redis_client
         self.gx = gx_validator
+        self.percentile_gx = percentile_validator
         self.features = feature_names(dataset)
         self.windows = (
             CountWindows(int(policy_config["window_size"]))
@@ -194,9 +202,11 @@ class MonitorCore:
             logger.warning("window_skipped_no_reference", window_id=window.window_id)
             return None
         signals = self.compute_signals(window)
+        frame = pd.DataFrame(window.features, columns=self.features)
+        signals.update(self._percentile_signals(frame))
         gx_ok = True
         if self.gx is not None:
-            report = self.gx.validate(pd.DataFrame(window.features, columns=self.features))
+            report = self.gx.validate(frame)
             gx_ok = report.success
             if not gx_ok:
                 signals["gx_failure"] = 1.0
@@ -230,6 +240,19 @@ class MonitorCore:
             "severity": decision.severity,
             "policy_version": self.policy.version,
             "window_end_ms": window.end_event_time_ms,
+        }
+
+    def _percentile_signals(self, frame: pd.DataFrame) -> dict[str, float]:
+        """Report whether the window leaves the fitted percentile bounds (empty if unconfigured)."""
+        if self.percentile_gx is None:
+            return {}
+        report = self.percentile_gx.validate(frame)
+        outside = sum(1 for name in report.failed if name.startswith(BETWEEN_EXPECTATION))
+        if not report.success:
+            GX_PERCENTILE_FAILURES.labels(dataset=self.dataset).inc()
+        return {
+            "gx_percentile_failure": 0.0 if report.success else 1.0,
+            "gx_percentile_failed_features": float(outside),
         }
 
     def _publish_gauges(self, signals: dict[str, float]) -> None:
@@ -306,7 +329,9 @@ class MonitorService:
             name=f"{dataset}_window",
         )
         mode = data_cfg.get("monitor_windows", "count")
-        self.core = MonitorCore(dataset, policy, self.redis, gx, mode)
+        self.core = MonitorCore(
+            dataset, policy, self.redis, gx, mode, self._percentile_validator(dataset, gx_cfg)
+        )
         self.references = ReferenceProvider(
             MlflowRegistry(self.settings.mlflow_tracking_uri),
             dataset,
@@ -315,6 +340,22 @@ class MonitorService:
             int(policy["evidently_max_rows"]),
         )
         self._running = True
+
+    def _percentile_validator(self, dataset: str, gx_cfg: dict):
+        """Build the reporting-only percentile suite, or None when no bounds file was fitted."""
+        from driftguard.training.validate import GXValidator, load_bounds
+
+        try:
+            bounds = load_bounds(self.settings.config_path("data", f"{dataset}_gx_bounds.json"))
+        except FileNotFoundError:
+            logger.warning("percentile_bounds_missing", dataset=dataset)
+            return None
+        return GXValidator(
+            bounds,
+            float(gx_cfg.get("mostly", 0.99)),
+            int(gx_cfg.get("min_window_rows", 100)),
+            name=f"{dataset}_window_percentile",
+        )
 
     def healthy(self) -> bool:
         """Liveness for `/healthz`."""

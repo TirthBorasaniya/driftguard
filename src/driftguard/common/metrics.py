@@ -102,6 +102,11 @@ WINDOWS_FLAGGED = Counter(f"{PREFIX}windows_flagged_total", "Monitor windows fla
 DATA_QUALITY_FAILURES = Counter(
     f"{PREFIX}data_quality_failures_total", "Windows failing the GX suite", ["dataset"]
 )
+GX_PERCENTILE_FAILURES = Counter(
+    f"{PREFIX}gx_percentile_failures_total",
+    "Windows outside the fitted percentile bounds (reported only, never gates retraining)",
+    ["dataset"],
+)
 MONITOR_DECODE_FAILURES = Counter(
     f"{PREFIX}monitor_decode_failures_total", "Messages the monitor could not decode", ["dataset"]
 )
