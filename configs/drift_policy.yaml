@@ -1,5 +1,6 @@
 # Drift decision policy (SPEC 5.3, 12). Versioned; drift events carry policy_version.
-version: 4
+# Version 5: ADWIN and KSWIN detections stay flagged for debounce_windows windows (DECISIONS D-023).
+version: 5
 window_size: 5000
 debounce_windows: 2
 cooldown_windows: 3

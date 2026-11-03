@@ -35,6 +35,9 @@ class DriftPolicy:
     flagged windows, once at least `min_labeled` labels arrived since the last promotion, and
     after `cooldown_windows` windows since the last event or promotion. A window failing the GX
     suite never emits and resets the debounce count; retraining pauses until a clean window.
+    A detection by a change-point signal (ADWIN, KSWIN) stays flagged for `debounce_windows`
+    windows including the one it fired in, because such a detector fires once per change
+    (DECISIONS D-023).
 
     Parameters
     ----------
@@ -53,6 +56,8 @@ class DriftPolicy:
         self.consecutive = 0
         self.windows_since = self.cooldown
         self.labeled_since_promotion = 0
+        # change-point signal name to the number of windows it stays flagged
+        self._latched: dict[str, int] = {}
 
     def add_labels(self, n: int) -> None:
         """Count labels received since the last promotion."""
@@ -63,6 +68,16 @@ class DriftPolicy:
         self.labeled_since_promotion = 0
         self.windows_since = 0
         self.consecutive = 0
+        self._latched = {}
+
+    def _apply_latches(self, signals: dict[str, float]) -> dict[str, float]:
+        """Return the signals with latched change-point detections held at 1.0, then age them."""
+        for name in CHANGE_SIGNALS:
+            if signals.get(name, 0.0) >= 1.0:
+                self._latched[name] = self.debounce
+        effective = {**signals, **dict.fromkeys(self._latched, 1.0)}
+        self._latched = {name: left - 1 for name, left in self._latched.items() if left > 1}
+        return effective
 
     def flag_reasons(self, signals: dict[str, float]) -> list[str]:
         """Return the names of the signals that flag this window."""
@@ -91,7 +106,7 @@ class DriftPolicy:
         window_id : str
             Window identifier.
         signals : dict
-            Signal values for the window.
+            Signal values for the window (not modified; latched detections are applied to a copy).
         o_gx_ok : bool
             False if the GX suite failed on the window.
 
@@ -100,6 +115,7 @@ class DriftPolicy:
         decision : PolicyDecision
         """
         self.windows_since += 1
+        signals = self._apply_latches(signals)
         reasons = self.flag_reasons(signals)
         decision = PolicyDecision(window_id, flagged=bool(reasons), reasons=reasons)
         if not o_gx_ok:
@@ -122,4 +138,5 @@ class DriftPolicy:
         decision.severity = self.severity(signals)
         self.consecutive = 0
         self.windows_since = 0
+        self._latched = {}
         return decision

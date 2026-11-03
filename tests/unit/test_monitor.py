@@ -223,7 +223,7 @@ def test_monitor_emits_event_after_debounced_shift():
         events += core.on_flows(flows) + core.on_predictions(_preds(flows, 0.9))
     assert len(events) == 1
     event = events[0]
-    assert event["severity"] == "HIGH" and event["policy_version"] == 4
+    assert event["severity"] == "HIGH" and event["policy_version"] == 5
     assert event["signals"]["psi_max"] > 0.5 and "window_end_ms" in event
 
 
@@ -290,6 +290,88 @@ def test_kswin_stride_offset_persists_across_windows():
         KswinScoreDetector(stride=0)
 
 
-def test_policy_version_four_carries_kswin_stride():
+def test_policy_version_five_carries_kswin_stride_and_latch_span():
     config = policy_config()
-    assert config["version"] == 4 and config["kswin"]["stride"] == 100
+    assert config["version"] == 5 and config["kswin"]["stride"] == 100
+    assert config["debounce_windows"] == 2
+
+
+# ----- change-point latch (D-023) -----
+
+
+def _ready_policy(**overrides):
+    policy = DriftPolicy(policy_config(**overrides))
+    policy.add_labels(10_000)
+    return policy
+
+
+def test_lone_adwin_detection_emits_after_the_debounce_span():
+    policy = _ready_policy()
+    first = policy.evaluate("w0", {**CLEAN, "adwin_error": 1.0}, True)
+    assert first.flagged and first.reasons == ["adwin_error"] and not first.emit
+    assert "debounce" in first.blocked_by
+    second = policy.evaluate("w1", CLEAN, True)
+    assert second.flagged and second.reasons == ["adwin_error"]
+    assert second.emit and second.severity == "HIGH"
+
+
+def test_lone_kswin_detection_emits_low_severity_after_the_debounce_span():
+    policy = _ready_policy()
+    assert not policy.evaluate("w0", {**CLEAN, "kswin_score": 1.0}, True).emit
+    decision = policy.evaluate("w1", CLEAN, True)
+    assert decision.emit and decision.severity == "LOW" and decision.reasons == ["kswin_score"]
+
+
+def test_latch_expires_after_the_span_without_a_new_detection():
+    policy = _ready_policy(debounce_windows=2, cooldown_windows=0)
+    policy.evaluate("w0", {**CLEAN, "kswin_score": 1.0}, True)
+    policy.evaluate("w1", CLEAN, True)  # emits and clears
+    assert not policy.evaluate("w2", CLEAN, True).flagged
+    assert not policy.evaluate("w3", CLEAN, True).flagged
+
+
+def test_latch_span_follows_debounce_windows():
+    policy = _ready_policy(debounce_windows=3)
+    decisions = [policy.evaluate("w0", {**CLEAN, "adwin_error": 1.0}, True)]
+    decisions += [policy.evaluate(f"w{i}", CLEAN, True) for i in (1, 2, 3)]
+    assert [d.flagged for d in decisions] == [True, True, True, False]
+    assert [d.emit for d in decisions] == [False, False, True, False]
+
+
+def test_a_new_detection_refreshes_the_latch():
+    policy = _ready_policy(debounce_windows=2, min_labeled=10**9)
+    policy.evaluate("w0", {**CLEAN, "adwin_error": 1.0}, True)
+    policy.evaluate("w1", {**CLEAN, "adwin_error": 1.0}, True)
+    assert policy.evaluate("w2", CLEAN, True).flagged
+    assert not policy.evaluate("w3", CLEAN, True).flagged
+
+
+def test_latch_does_not_change_debounce_for_threshold_signals():
+    policy = _ready_policy()
+    assert not policy.evaluate("w0", FLAG, True).emit
+    assert not policy.evaluate("w1", CLEAN, True).flagged
+    assert not policy.evaluate("w2", CLEAN, True).emit
+
+
+def test_gx_failure_still_ages_the_latch_and_never_emits():
+    policy = _ready_policy()
+    policy.evaluate("w0", {**CLEAN, "adwin_error": 1.0}, True)
+    failed = policy.evaluate("w1", CLEAN, False)
+    assert failed.data_quality_failed and not failed.emit and policy.consecutive == 0
+    assert not policy.evaluate("w2", CLEAN, True).flagged
+
+
+def test_promotion_clears_the_latch():
+    policy = _ready_policy()
+    policy.evaluate("w0", {**CLEAN, "kswin_score": 1.0}, True)
+    policy.note_promotion()
+    assert not policy.evaluate("w1", CLEAN, True).flagged
+
+
+def test_evaluate_does_not_mutate_the_callers_signals():
+    policy = _ready_policy()
+    signals = {**CLEAN, "adwin_error": 1.0}
+    policy.evaluate("w0", signals, True)
+    follow_up = dict(CLEAN)
+    policy.evaluate("w1", follow_up, True)
+    assert signals["adwin_error"] == 1.0 and "adwin_error" not in follow_up
