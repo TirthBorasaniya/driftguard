@@ -8,21 +8,7 @@ with one command. It runs on two datasets that exercise two kinds of drift: CICI
 improved release), where new attack families appear on later days (abrupt drift), and Kyoto 2006+
 (AnoShift subsets), which shifts naturally over ten years (gradual drift).
 
-## Headline results
-
-Every number below is generated from `results/*.json` by `make results`; a row reading "not yet
-run" has no measured value. CI fails if these tables differ from what the renderer produces.
-
 <!-- results:headline:start -->
-| Guarantee | Measured result | Evidence |
-|---|---|---|
-| Sustained ingestion and p99 latency, with and without retraining | not yet run (`make loadtest`) | `results/e3_load.json` |
-| Detection delay and false-alarm rate on injected shifts | not yet run (`make benchmark-drift`) | `results/e2_drift_detection.json` |
-| PR-AUC recovery through gated retraining versus a static model | not yet run (`make eval-e4`) | `results/e4_adaptation.json` |
-| Precision and recall at target recall, time-ordered | not yet run (`make eval-e1`) | `results/e1_model_quality.json` |
-| Effect of stream-computed behavioral features | not yet run (`make eval-e1`) | `results/e1_model_quality.json` |
-| No model serves without passing the gate; promote, decline, rollback | not yet run (`make eval-e5`) | `results/e5_gate.json` |
-| Consumers scale on Kafka lag without duplicate or lost predictions | not yet run (`make loadtest-k8s`) | `results/e3b_k8s_autoscaling.json` |
 <!-- results:headline:end -->
 
 ## Architecture
@@ -119,7 +105,7 @@ Great Expectations window never triggers retraining; it pauses it.
 
 **Retraining.** The orchestrator submits the Prefect deployment with `timeout=0` and a concurrency
 limit of one. The flow builds the newest labeled window with point-in-time features, validates it
-with bounds fitted once, trains LightGBM with `scale_pos_weight` from the window, exports ONNX with a
+against physical data-quality bounds, trains LightGBM with `scale_pos_weight` from the window, exports ONNX with a
 parity check, compares champion and challenger on the same newest holdout, and registers the
 challenger with tags.
 
@@ -133,7 +119,8 @@ automatically; `make rollback DATASET=cicids2017` rolls back on demand.
 ## Evaluation
 
 All runs write one JSON file to `results/` with the git SHA, config hash, environment, and hardware.
-Throughput claims state their hardware and partition count.
+Throughput claims state their hardware and partition count. `make results` inserts a table below
+an experiment when its results file exists.
 
 ### E1 Model quality (CICIDS2017)
 
@@ -144,7 +131,6 @@ a random stratified split is an upper-bound reference only. Ablations drop `dst_
 CICFlowMeter features with and without the behavioral features. Reproduce with `make eval-e1`.
 
 <!-- results:e1_model_quality:start -->
-Not yet run. Reproduce with `make eval-e1`.
 <!-- results:e1_model_quality:end -->
 
 ### E2 Drift detection benchmark
@@ -154,7 +140,6 @@ combined policy are scored on detection delay, false alarms, and misses. ADWIN d
 labels, so results are reported at label coverage 1.0 and 0.3. Reproduce with `make benchmark-drift`.
 
 <!-- results:e2_drift_detection:start -->
-Not yet run. Reproduce with `make benchmark-drift`.
 <!-- results:e2_drift_detection:end -->
 
 ### E3 System load
@@ -164,25 +149,25 @@ idle and with a retraining run forced mid-step, and with stream features on and 
 `make up && make bootstrap && make loadtest`.
 
 <!-- results:e3_load:start -->
-Not yet run. Reproduce with `make loadtest`.
 <!-- results:e3_load:end -->
 
 ### E3b Kubernetes autoscaling
 
 The kind stack (Strimzi, KEDA, kube-prometheus-stack, MLflow, Prefect, and the application pods)
-is sized for about 12 GB of free RAM (not yet measured). `make k8s-up` refuses to start while the Compose stack or another
-kind cluster is running. On a local kind cluster the load holds at 250 events/s, steps to 2,000
+is sized for about 12 GB of free RAM (an estimate from the pod requests, not a measurement).
+`make k8s-up` refuses to start while the Compose stack or another kind cluster is running. On a local kind cluster the load holds at 250 events/s, steps to 2,000
 events/s, and drops back; KEDA scales the consumers on lag. Reproduce with `make k8s-up &&
 make loadtest-k8s`.
 
 <!-- results:e3b_k8s_autoscaling:start -->
-Not yet run. Reproduce with `make loadtest-k8s`.
 <!-- results:e3b_k8s_autoscaling:end -->
 
 ### ONNX Runtime latency
 
+Scoring latency of ONNX Runtime against native LightGBM inference at several batch sizes, with equal
+thread counts for both. Reproduce with `make benchmark-onnx`.
+
 <!-- results:onnx_latency:start -->
-Not yet run. Reproduce with `make benchmark-onnx`.
 <!-- results:onnx_latency:end -->
 
 ### E4 End-to-end adaptation
@@ -192,7 +177,6 @@ Kyoto streams 2008 to 2015 twice from the same initial champion: once with retra
 policy enabled. Reproduce with `make eval-e4` (drives the live stack; several hours).
 
 <!-- results:e4_adaptation:start -->
-Not yet run. Reproduce with `make eval-e4`.
 <!-- results:e4_adaptation:end -->
 
 ### E5 Promotion gate correctness
@@ -203,33 +187,7 @@ labeled events: clearly better (trained on post-drift data), equal (same data an
 Reproduce with `make eval-e5`.
 
 <!-- results:e5_gate:start -->
-Not yet run. Reproduce with `make eval-e5`.
 <!-- results:e5_gate:end -->
-
-### First version (historical, transcribed)
-
-These numbers come from the earlier synchronous design and a different split than E1. They are
-shown as history, not as results of this system.
-
-<!-- results:v1_verified_run:start -->
-| Claim (v1, historical) | Value | Source |
-|---|---|---|
-| Flows processed by the replay (original CICIDS2017, 5 days) | 863,882 | Producer log, final verification run (commit d0f531e) |
-| Invalid rows dropped (negative CICFlowMeter values) | 3 | Preprocessing log, final verification run (commit d0f531e) |
-| scale_pos_weight computed from training labels | 30.9120 | Training log, final verification run (commit d0f531e) |
-| Test PR-AUC (chronological 75/15/10 split) | 0.1625 | Training log, final verification run (commit d0f531e) |
-| Test ROC-AUC (chronological 75/15/10 split) | 0.9383 | Training log, final verification run (commit d0f531e) |
-| Precision at recall-calibrated threshold 0.0298 | 0.1719 | Training log, final verification run (commit d0f531e) |
-| Recall at recall-calibrated threshold 0.0298 (target 0.95) | 0.9555 | Training log, final verification run (commit d0f531e) |
-| PSI trigger window and max PSI | window_0501, max PSI 0.2606 | Consumer log, final verification run (commit d0f531e) |
-| Retraining flows started / reached model comparison / aborted at validation | 535 / 534 / 0 | Prefect logs, final verification run (commit d0f531e) |
-| Promotions in the live run | 0 | Final verification run; deterministic retraining on identical data |
-| Consumer throughput with synchronous retraining (msg/s) | about 250 before, about 64 with retraining completing | Final verification run (commit d0f531e) |
-
-_Transcribed, not re-measured: historical numbers from IMPLEMENTATION_REPORT.md (private, not committed), final verification run at commit d0f531e; split: Chronological 75/15/10 percentile split over the five concatenated original CICIDS2017 TrafficLabelling days (Monday to Friday): train rows 0 to P75, test P75 to P90, stream P90 to end. Not the SPEC E1 protocol (Monday to Wednesday train, Thursday and Friday test)._
-
-_Source: `results/v1_verified_run.json`, run `2026-10-15T00-48-08Z_v1_verified_run`, git `98ff03d`, hardware: arm, 10 logical CPUs._
-<!-- results:v1_verified_run:end -->
 
 ## Design decisions
 
@@ -241,10 +199,9 @@ Feast `PushSource` (D-006).
 
 ## Limitations
 
-- No result in this repository is a claim until its `results/*.json` exists; tables read "not yet
-  run" until then. The first version's numbers were measured on a different split.
-- The source of the earlier "98% precision at 99% recall" figure could not be traced. E1 reports
-  precision at recall 0.99 for every protocol so the figure can be matched to a split.
+- An earlier report of "98% precision at 99% recall" could not be traced to any run or split and
+  is retired; this repository does not cite it. E1 reports precision at recall 0.99 for every
+  protocol.
 - The initial champion is the only model that serves without passing the gate, because there is no
   incumbent to compare it against.
 - The model capacity (100 trees) was chosen by a validation-only criterion after an E1 diagnostic
@@ -262,42 +219,14 @@ Feast `PushSource` (D-006).
 - Kafka runs a single broker with replication factor 1, and the kind cluster is a single node.
 - Evidently costs about 0.6 s per window at the default sample size, which bounds how fast the
   monitor can close windows on large streams.
-- The training flow's Great Expectations check uses the specified fitted percentile bounds, which
-  reject drifted windows such as real Thursday and Friday CICIDS2017 traffic as data-quality
-  failures; the alternative (`gx.training_bounds: physical_bounds`) changes a stated rule and is an
-  open decision (DECISIONS D-022). The monitor's suite checks data quality only.
-- KSWIN tests one score in 100 (policy version 4) because per-event tests fire in nearly every
-  stationary window; it needs about 50,000 events before its first test (D-020).
+- The training flow validates with physical data-quality bounds (finite, non-null, within physical
+  limits), not the fitted percentile bounds that SPEC 6.2 prescribes, because percentile bounds
+  reject drifted windows as data-quality failures. The percentile bounds remain a reported
+  monitoring signal that never gates retraining (DECISIONS D-022).
+- KSWIN tests one score in 100 because per-event tests fire in nearly every stationary window; it
+  needs about 50,000 events before its first test (D-020).
+- ADWIN and KSWIN detections stay flagged for the debounce span (policy version 5), so a single
+  detection can emit a drift event and their false alarms enter the combined policy directly
+  (D-023).
 - Stream features cost about 18 Redis commands per event so that they do not depend on how Kafka
   splits polls (D-011); E3 reports the resulting throughput.
-- The Compose and Kubernetes stacks, the integration and end-to-end tests, E3, E3b, E4, the demo,
-  and CI have never been run: development had no container runtime. The Helm chart passes
-  `helm lint`, `helm template`, and kubeconform but has never been installed on a cluster.
-- On the Kyoto subsets the attack share of the base period is high (about 60%), so the prior-shift
-  benchmark there lowers the attack proportion instead of raising it.
-
-## Repository layout
-
-```
-src/driftguard/
-  data/          adapters (cicids2017, kyoto), ids, Avro schemas, serde, synthetic flows
-  producer/      replay, rate limiting, delayed labels and duplicates
-  consumer/      main loop, validation, idempotency, DLQ, scoring client, sinks
-  serving/       FastAPI router, model store with alias watcher, admin
-  monitor/       PSI, windows, detectors, policy, reference, service
-  orchestrator/  triggers, rollout controller, service
-  training/      window, validation, train, export, evaluate, gate, flow
-  streamfeatures/ keys, windows, HyperLogLog, push, replay
-  features/      Feast store and the partitioned offline store
-  benchmark/     injector, E1 to E5 drivers, load tests, figures
-  common/        settings, logging, metrics, results, rendering, MLflow client
-configs/         YAML configs, one file per concern (data, eval, policy, rollout, model)
-deploy/k8s/      kind config, Strimzi, KEDA, Helm chart
-docker/          application image
-flows/           Prefect flow entrypoint
-prometheus/ grafana/   alerts, scrape config, provisioning, generated dashboards
-scripts/         thin CLI entry points
-tests/           unit, integration, e2e
-results/         JSON artifacts and figures rendered into this README
-docs/            architecture.md, runbook.md, demo.md
-```

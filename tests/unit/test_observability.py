@@ -234,6 +234,7 @@ def test_e2_renderer_shows_the_data_quality_gate_table():
 def test_headline_lists_every_guarantee_with_a_results_file(tmp_path):
     """Regression: several rows were silently dropped by a failed text replacement."""
     from driftguard.common.render import HEADLINE_ROWS, render_headline
+    from driftguard.common.results import write_results
 
     names = {row[1] for row in HEADLINE_ROWS}
     assert names == {
@@ -245,8 +246,13 @@ def test_headline_lists_every_guarantee_with_a_results_file(tmp_path):
         "e5_gate",
     }
     assert len(HEADLINE_ROWS) == 7
+    assert render_headline(tmp_path) == ""
+    metrics = {"challengers": {"better": {"decision": "promote"}}, "all_match_expected": True}
+    write_results("e5_gate", metrics, None, results_dir=tmp_path)
     text = render_headline(tmp_path)
-    assert text.count("not yet run") == 7 and "results/e5_gate.json" in text
+    assert text.startswith("## Headline results") and "results/e5_gate.json" in text
+    assert text.count("`results/") == 1 and "results/e3_load.json" not in text
+    assert "not yet run" not in text.lower()
 
 
 def _rates():

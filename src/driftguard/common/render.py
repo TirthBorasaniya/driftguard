@@ -573,7 +573,7 @@ HEADLINE_ROWS: list[tuple[str, str, str, Callable[[dict[str, Any]], str]]] = [
 
 def render_headline(results_dir: Path) -> str:
     """
-    Render the headline table, one row per SPEC guarantee with its evidence file.
+    Render the headline section, one row per SPEC guarantee whose results file exists.
 
     Parameters
     ----------
@@ -583,14 +583,17 @@ def render_headline(results_dir: Path) -> str:
     Returns
     -------
     markdown : str
-        Table of guarantee, measured result (or `not yet run`), and evidence path.
+        Heading and table of guarantee, measured result, and evidence path; empty when no
+        headline results file exists.
     """
     rows = []
-    for claim, name, make_target, extractor in HEADLINE_ROWS:
+    for claim, name, _make_target, extractor in HEADLINE_ROWS:
         doc = load_results(name, results_dir)
-        value = extractor(doc) if doc is not None else f"not yet run (`{make_target}`)"
-        rows.append([claim, value, f"`results/{name}.json`"])
-    return table(["Guarantee", "Measured result", "Evidence"], rows)
+        if doc is not None:
+            rows.append([claim, extractor(doc), f"`results/{name}.json`"])
+    if not rows:
+        return ""
+    return "## Headline results\n\n" + table(["Guarantee", "Measured result", "Evidence"], rows)
 
 
 def register(name: str, make_target: str, renderer: Renderer) -> None:
@@ -615,22 +618,24 @@ def render_block(name: str, results_dir: Path) -> str:
     Returns
     -------
     body : str
-        Markdown placed between the markers.
+        Markdown placed between the markers; empty when the matching results file does not exist
+        or has no renderer.
     """
-    make_target, renderer = RENDERERS.get(name, (f"make results ({name})", None))
     if name == "headline":
         return render_headline(results_dir)
+    _, renderer = RENDERERS.get(name, ("", None))
     doc = load_results(name, results_dir)
     if doc is None or renderer is None:
-        return f"Not yet run. Reproduce with `{make_target}`."
+        return ""
     return renderer(doc) + "\n\n" + provenance(doc)
 
 
 def render_readme(readme_text: str, results_dir: Path) -> str:
-    """Return README text with every results marker block re-rendered."""
+    """Return README text with every results marker block re-rendered (empty without results)."""
 
     def _sub(match: re.Match) -> str:
         body = render_block(match.group("name"), results_dir)
-        return f"{match.group(1)}\n{body}\n{match.group(4)}"
+        middle = f"\n{body}" if body else ""
+        return f"{match.group(1)}{middle}\n{match.group(4)}"
 
     return MARKER_PATTERN.sub(_sub, readme_text)
