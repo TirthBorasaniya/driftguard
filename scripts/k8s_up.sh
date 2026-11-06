@@ -4,6 +4,10 @@
 set -euo pipefail
 
 CLUSTER=driftguard
+APP_NAMESPACE=driftguard
+# the operator runs in its own namespace and watches only the application namespace; listing its
+# own namespace in watchNamespaces makes the chart render the same RoleBindings twice
+STRIMZI_NAMESPACE=strimzi
 STRIMZI_VERSION=0.45.0
 KEDA_VERSION=2.16.1
 KPS_VERSION=66.3.1
@@ -39,15 +43,19 @@ helm repo add strimzi https://strimzi.io/charts/ --force-update
 helm repo add kedacore https://kedacore.github.io/charts --force-update
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts --force-update
 
-kubectl create namespace driftguard
-kubectl create namespace monitoring
-helm install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+# every install is helm upgrade --install, so a re-run converges instead of failing on existing
+# releases; the application namespace must exist before the operator creates RoleBindings in it
+for namespace in "${APP_NAMESPACE}" monitoring; do
+  kubectl create namespace "${namespace}" --dry-run=client -o yaml | kubectl apply -f -
+done
+helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
   --version "${KPS_VERSION}" --namespace monitoring \
   -f deploy/k8s/kube-prometheus-values.yaml \
   --set grafana.adminPassword="${GF_ADMIN_PASSWORD}" --wait --timeout 10m
-helm install strimzi strimzi/strimzi-kafka-operator --version "${STRIMZI_VERSION}" \
-  --namespace driftguard --set watchNamespaces="{driftguard}" --wait
-helm install keda kedacore/keda --version "${KEDA_VERSION}" --namespace keda --create-namespace \
+helm upgrade --install strimzi strimzi/strimzi-kafka-operator --version "${STRIMZI_VERSION}" \
+  --namespace "${STRIMZI_NAMESPACE}" --create-namespace \
+  --set watchNamespaces="{${APP_NAMESPACE}}" --wait
+helm upgrade --install keda kedacore/keda --version "${KEDA_VERSION}" --namespace keda --create-namespace \
   --wait
 
 kubectl apply -f deploy/k8s/strimzi/kafka.yaml
@@ -56,7 +64,7 @@ kubectl apply -f deploy/k8s/strimzi/topics.yaml
 
 # no --wait: serving readiness needs the champion that the bootstrap Job creates, so waiting here
 # would deadlock; wait for the Job first and then for every Deployment
-helm install driftguard deploy/k8s/charts/driftguard --namespace driftguard \
+helm upgrade --install driftguard deploy/k8s/charts/driftguard --namespace "${APP_NAMESPACE}" \
   -f deploy/k8s/values-kind.yaml \
   --set secrets.adminToken="${ADMIN_TOKEN}" --set secrets.ipHashSalt="${IP_HASH_SALT}" \
   --timeout 5m

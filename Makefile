@@ -161,8 +161,17 @@ loadtest-k8s:
 chart-files:
 	$(PY) scripts/sync_chart_files.py
 
+# operator namespace and version come from k8s_up.sh so validation renders what the install uses
+STRIMZI_VERSION := $(shell sed -n 's/^STRIMZI_VERSION=//p' scripts/k8s_up.sh)
+STRIMZI_NAMESPACE := $(shell sed -n 's/^STRIMZI_NAMESPACE=//p' scripts/k8s_up.sh)
+APP_NAMESPACE := $(shell sed -n 's/^APP_NAMESPACE=//p' scripts/k8s_up.sh)
+
 k8s-validate:
 	$(PY) scripts/sync_chart_files.py --check
+	$(HELM) repo add strimzi https://strimzi.io/charts/ --force-update
+	$(HELM) template strimzi strimzi/strimzi-kafka-operator --version $(STRIMZI_VERSION) \
+		--namespace $(STRIMZI_NAMESPACE) --set watchNamespaces="{$(APP_NAMESPACE)}" \
+		| $(PY) scripts/check_duplicate_resources.py
 	$(HELM) lint deploy/k8s/charts/driftguard --set secrets.adminToken=x --set secrets.ipHashSalt=y
 	$(HELM) template driftguard deploy/k8s/charts/driftguard -f deploy/k8s/values-kind.yaml \
 		--set secrets.adminToken=x --set secrets.ipHashSalt=y > .tmp/rendered.yaml
