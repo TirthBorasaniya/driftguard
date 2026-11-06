@@ -18,6 +18,11 @@ jobs:
           version: "0.13.0"
       - name: Install dependencies
         run: uv sync --frozen --python 3.11
+      - name: Run the containers as the runner user
+        run: |
+          echo "HOST_UID=$(id -u)" >> "$GITHUB_ENV"
+          echo "HOST_GID=$(id -g)" >> "$GITHUB_ENV"
+          mkdir -p data/raw data/processed results
       - name: Write .env from the example with CI secrets
         run: |
           sed -e "s/^ADMIN_TOKEN=.*/ADMIN_TOKEN=${ADMIN_TOKEN}/" \

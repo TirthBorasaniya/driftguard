@@ -4,6 +4,9 @@ x-app: &app
   build:
     context: .
     dockerfile: docker/app.Dockerfile
+    args:
+      APP_UID: ${HOST_UID:-10001}
+      APP_GID: ${HOST_GID:-10001}
   image: driftguard-app:dev
   env_file: .env
   environment: &app-env

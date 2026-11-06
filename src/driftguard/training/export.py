@@ -4,6 +4,7 @@ from pathlib import Path
 
 import lightgbm as lgb
 import numpy as np
+import onnx
 import onnxruntime as ort
 from onnxmltools import convert_lightgbm
 from onnxmltools.convert.common.data_types import FloatTensorType
@@ -11,9 +12,35 @@ from onnxmltools.convert.common.data_types import FloatTensorType
 # ============= Constants =============
 
 INPUT_NAME = "input"
+BATCH_AXIS = "batch"
 
 
 # ============= Export =============
+
+
+def set_dynamic_batch(model: onnx.ModelProto) -> onnx.ModelProto:
+    """
+    Declare the leading dimension of every graph input and output as the dynamic `batch` axis.
+
+    The LightGBM converter declares the `label` output with a fixed shape of 1, so ONNX Runtime
+    warns on every batch of another size. The model is modified in place.
+
+    Parameters
+    ----------
+    model : onnx.ModelProto
+        Converted model.
+
+    Returns
+    -------
+    model : onnx.ModelProto
+        The same model with a dynamic batch dimension on inputs and outputs.
+    """
+    for value in [*model.graph.input, *model.graph.output]:
+        dims = value.type.tensor_type.shape.dim
+        if len(dims):
+            dims[0].Clear()
+            dims[0].dim_param = BATCH_AXIS
+    return model
 
 
 def to_onnx_bytes(
@@ -36,7 +63,8 @@ def to_onnx_bytes(
     Returns
     -------
     payload : bytes
-        Serialized ONNX model with outputs `label` and `probabilities` (no ZipMap).
+        Serialized ONNX model with outputs `label` and `probabilities` (no ZipMap) and a
+        dynamic batch dimension on the input and both outputs.
     """
     onnx_model = convert_lightgbm(
         model,
@@ -45,7 +73,7 @@ def to_onnx_bytes(
         target_opset=target_opset,
         split=split,
     )
-    return onnx_model.SerializeToString()
+    return set_dynamic_batch(onnx_model).SerializeToString()
 
 
 def onnx_session(payload: bytes | str | Path, threads: int = 1) -> ort.InferenceSession:

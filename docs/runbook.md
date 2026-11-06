@@ -66,5 +66,9 @@ window holds null, infinite, or physically impossible values; do not loosen thos
 - `serving` not ready: no champion is registered. Run `make bootstrap`.
 - Monitor logs `percentile_bounds_missing` and reports no percentile signal:
   `configs/data/<dataset>_gx_bounds.json` is missing. Run `make fit-gx-bounds`.
+- `PermissionError` writing `/app/results` or `/app/data`: the image was built for another uid.
+  The image runs as `HOST_UID` and `HOST_GID` (`make` exports yours). On Linux, when calling
+  `docker compose` directly, run `HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up -d --build`.
+  Never run compose as root, and never `chmod 777` the mounts (DECISIONS D-026).
 - Stream features fail at startup: `IP_HASH_SALT` is empty.
 - Prefect worker cannot deploy: check that `prefect-server` is healthy and `PREFECT_API_URL` is set.

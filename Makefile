@@ -5,6 +5,9 @@ export UV_CACHE_DIR := $(CURDIR)/.cache/uv
 export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.cache/uv-python
 export MPLCONFIGDIR := $(CURDIR)/.cache/matplotlib
 export PYTHONPATH := $(CURDIR)/src
+# the application image runs as the host user, so bind-mounted results/ and data/ stay writable
+export HOST_UID ?= $(shell id -u)
+export HOST_GID ?= $(shell id -g)
 UV := uv
 PY := $(UV) run python
 
@@ -62,6 +65,7 @@ producer:
 
 up: env
 	./scripts/check_stack_free.sh compose
+	@mkdir -p data/raw data/processed results
 	@test -f data/raw/cicids2017_improved/monday.csv || $(MAKE) download-cicids
 	@test -f configs/data/cicids2017_gx_bounds.json || $(MAKE) fit-gx-bounds
 	docker compose up -d --build --wait
