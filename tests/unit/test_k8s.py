@@ -229,8 +229,9 @@ def test_every_release_is_installed_idempotently():
     assert creates and all("--dry-run=client" in line for line in creates)
 
 
-def test_nightly_workflow_stays_dispatchable():
-    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "k8s-nightly.yml").read_text())
+@pytest.mark.parametrize("name", ["k8s-nightly.yml", "integration.yml"])
+def test_stack_workflows_are_manual_dispatch_only(name):
+    """Both stack workflows run on manual dispatch until one manual run passes (DECISIONS D-025)."""
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / name).read_text())
     triggers = workflow.get("on", workflow.get(True))
-    assert "workflow_dispatch" in triggers and "push" not in triggers
-    assert "pull_request" not in triggers
+    assert set(triggers) == {"workflow_dispatch"}

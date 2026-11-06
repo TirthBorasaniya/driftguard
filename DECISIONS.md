@@ -174,3 +174,10 @@ Decision: the operator is installed into a dedicated `strimzi` namespace and wat
 Alternatives: drop `watchNamespaces` so the operator watches its own namespace (rejected: couples the operator to the application namespace and hides the same mistake if a watch list is added later), keep one namespace and remove the duplicate RoleBindings by hand (rejected: a patched release drifts from the chart).
 Consequences: the operator pods run in `strimzi`, the Kafka cluster and its bootstrap service stay in `driftguard`, so the KEDA trigger and the application settings are unchanged. The workflow triggers are unchanged.
 
+## D-025: Stack workflows run on manual dispatch only until one manual run passes
+Status: accepted (2026-11-06)
+Context: CONVENTIONS section 3 runs `integration.yml` on manual dispatch and nightly, and the specification asks for a nightly kind job. The k8s-nightly job failed at its first run (D-024), and neither stack workflow has ever completed a run.
+Decision: `integration.yml` and `k8s-nightly.yml` keep only the `workflow_dispatch` trigger. The cron schedules return in a dedicated commit after a manual run of each workflow passes. This deviates from the convention for now and `.planning/AUDIT.md` lists it.
+Alternatives: keep the schedules (rejected: a workflow that fails on every run must not remain, per CONVENTIONS section 3, and nightly failures are noise until the first manual pass), delete the workflows (rejected: the integration and kind evidence in the specification needs them).
+Consequences: no automatic nightly signal for the Compose and kind stacks until the schedules are restored.
+
